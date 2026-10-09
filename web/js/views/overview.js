@@ -3,25 +3,21 @@
 import * as core from '../core.js';
 import { h, icon } from '../dom.js';
 import { settings } from '../store.js';
-import { isStatic, ui } from '../state.js';
-import { watched, project, have, ensure, ensureAudits } from '../projects.js';
+import { ui } from '../state.js';
+import { watched, pinned, project, have, ensure, ensureAudits } from '../projects.js';
 import {
   box, table, flash, blank, pageHead, spinner, stateEl, statusOf, verdictState, vulnLink, releaseLink,
-  projectHref, projectName, labelEl, youUse, haveSelect,
+  projectHref, projectName, labelEl, youUse, haveSelect, supportLabel,
 } from '../ui.js';
 import { verifyModule } from './verify.js';
-import { addPage } from './pages.js';
+import { searchModule } from './search.js';
 
-function welcome() {
+function nothingPinned() {
   return box({
-    title: 'Watch your first project',
+    title: 'Nothing pinned yet',
     body: h('div', { class: 'blankslate' },
-      h('p', {}, "Add any repository that releases with letsgo. You'll see which version to use, whether yours needs an update, and what each release recorded."),
-      h('form', { class: 'input-group', 'data-form': 'add' },
-        h('input', { class: 'form-control mono', id: 'add-spec', type: 'text', placeholder: 'owner/repo', 'aria-label': 'Repository', autocomplete: 'off' }),
-        h('button', { class: 'btn btn-primary', type: 'submit' }, 'Watch')),
-      h('p', { class: 'small' }, 'Or ',
-        h('button', { class: 'btn btn-sm', 'data-action': 'add-example' }, 'watch danielriddell21/letsgo'),
+      h('p', {}, "Search for a repository above and pin it. You'll see which version to use, whether yours needs an update, and, for repositories released with letsgo, what each release recorded."),
+      h('p', { class: 'small' }, 'Try ', h('button', { class: 'btn btn-sm', 'data-action': 'add-example' }, 'pinning danielriddell21/letsgo'),
         ' · ', h('a', { href: '#/add' }, "browse an owner's repositories"))),
   });
 }
@@ -51,7 +47,8 @@ function nameCell(p) {
   const avatar = p.meta?.avatar ? h('img', { class: 'avatar avatar-sm', src: p.meta.avatar, alt: '' }) : null;
   return h('td', {},
     h('a', { href: projectHref(p), class: 'row' }, avatar, h('span', {}, projectName(p))),
-    p.meta?.private ? [' ', labelEl('Private')] : null);
+    p.meta?.private ? [' ', labelEl('Private')] : null,
+    [' ', supportLabel(p)]);
 }
 
 function messageRow(p, ...message) {
@@ -64,10 +61,7 @@ function projectRow(p) {
   }
   if (p.status !== 'ready') return messageRow(p, spinner());
   const latest = core.latestStable(p.releases);
-  if (!latest) {
-    const others = p.other ? ` (${core.plural(p.other, 'other release')})` : '';
-    return messageRow(p, h('span', { class: 'muted' }, `No stable releases made with letsgo${others}.`));
-  }
+  if (!latest) return messageRow(p, h('span', { class: 'muted' }, 'No stable releases.'));
   const mine = have(p);
   const status = mine ? verdictState(core.verdict(p.releases, mine)) : statusOf(latest);
   return h('tr', {}, nameCell(p),
@@ -77,12 +71,12 @@ function projectRow(p) {
 }
 
 function projectsModule() {
-  const specs = watched();
+  const list = pinned();
   return box({
-    title: 'Projects',
-    counter: specs.length,
-    actions: h('a', { class: 'btn btn-sm', href: '#/add' }, icon('plus'), 'Add project'),
-    body: table(['Project', 'You use', 'Latest', 'Status'], specs.map(s => projectRow(project(s)))),
+    title: 'Pinned projects',
+    counter: list.length,
+    actions: h('a', { class: 'btn btn-sm', href: '#/add' }, icon('plus'), 'Pin a project'),
+    body: table(['Project', 'You use', 'Latest', 'Status'], list.map(projectRow)),
   });
 }
 
@@ -199,6 +193,7 @@ export function dependenciesModule(full) {
 }
 
 const MODULES = {
+  search: searchModule,
   attention: attentionModule,
   projects: projectsModule,
   recent: recentModule,
@@ -209,9 +204,9 @@ const MODULES = {
 
 export function overviewPage() {
   const specs = watched();
-  if (!specs.length) return isStatic() ? addPage() : welcome();
   for (const s of specs) prime(project(s));
   const on = settings.get().overview.filter(m => m.on);
   if (!on.length) return blank('Nothing to show', 'Every overview module is turned off. ', h('a', { href: '#/settings' }, 'Choose modules'));
+  if (!specs.length) return [on.some(m => m.id === 'search') ? searchModule() : null, nothingPinned()];
   return on.map(m => MODULES[m.id]());
 }

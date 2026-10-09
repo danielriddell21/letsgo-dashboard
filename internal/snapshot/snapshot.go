@@ -62,6 +62,16 @@ type Release struct {
 	Published string           `json:"published"`
 	Body      string           `json:"body"`
 	Assets    map[string]int64 `json:"assets"`
+	Files     []File           `json:"files"`
+}
+
+// File is a release file as the releases-only view lists it: what GitHub
+// reports, including the SHA-256 of its bytes.
+type File struct {
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	Digest string `json:"digest"`
+	URL    string `json:"url"`
 }
 
 // Repo is a repository as the page reads it.
@@ -146,8 +156,11 @@ func (o Options) repo(ctx context.Context, full string) error {
 			PublishedAt string `json:"published_at"`
 			Body        string `json:"body"`
 			Assets      []struct {
-				ID   int64  `json:"id"`
-				Name string `json:"name"`
+				ID                 int64  `json:"id"`
+				Name               string `json:"name"`
+				Size               int64  `json:"size"`
+				Digest             string `json:"digest"`
+				BrowserDownloadURL string `json:"browser_download_url"`
 			} `json:"assets"`
 		}
 		if err := o.getJSON(ctx, fmt.Sprintf("/repos/%s/releases?per_page=100&page=%d", full, page), &batch); err != nil {
@@ -160,6 +173,7 @@ func (o Options) repo(ctx context.Context, full string) error {
 			r := Release{Tag: b.TagName, URL: b.HTMLURL, Published: b.PublishedAt, Body: truncate(b.Body, 2000), Assets: map[string]int64{}}
 			for _, a := range b.Assets {
 				r.Assets[a.Name] = a.ID
+				r.Files = append(r.Files, File{Name: a.Name, Size: a.Size, Digest: a.Digest, URL: a.BrowserDownloadURL})
 			}
 			releases = append(releases, r)
 		}

@@ -244,6 +244,7 @@ export function status(r) {
   if (a?.status === 'affected') return { kind: 'danger', label: 'Vulnerable', ids: (a.findings || []).map(f => f.id) };
   if (a) return { kind: 'success', label: 'No known issues', at: String(a.at).slice(0, 10) };
   if (r.prerelease) return { kind: 'secondary', label: 'Pre-release' };
+  if (r.hasManifest === false) return { kind: 'secondary', label: 'Not made with letsgo' };
   return { kind: 'secondary', label: 'Not audited' };
 }
 
@@ -329,13 +330,38 @@ export function digests(manifest) {
   return out;
 }
 
+// ---------- releases that weren't made with letsgo
+
+const OS_WORDS = { darwin: ['darwin', 'macos', 'osx', 'apple'], linux: ['linux'], windows: ['windows', 'win64', 'win32', '.exe', '.msi'] };
+const ARCH_WORDS = { arm64: ['arm64', 'aarch64'], amd64: ['amd64', 'x86_64', 'x86-64', 'x64'], 386: ['386', 'i386', 'x86'] };
+
+const wordsIn = (name, table) => Object.keys(table).find(k => table[k].some(w => name.includes(w)));
+
+// matchesPlatform guesses whether a release file is for a platform such as
+// "linux/amd64", from its name alone: the operating system must be named, and
+// the architecture must agree when it is named (a universal build names none).
+export function matchesPlatform(fileName, platform) {
+  const [os, arch] = platform.split('/');
+  const name = fileName.toLowerCase();
+  if (wordsIn(name, OS_WORDS) !== os) return false;
+  const found = wordsIn(name.replace('x86_64', 'amd64'), ARCH_WORDS);
+  return found === undefined || found === arch;
+}
+
+// fileDigests lists the SHA-256 GitHub reports for each of a release's
+// files, which is all there is to check a file against when a release wasn't
+// made with letsgo.
+export function fileDigests(files) {
+  return (files || []).filter(f => /^sha256:[0-9a-f]{64}$/.test(f.digest || '')).map(f => ({ sha256: f.digest.slice('sha256:'.length), what: 'release file', file: f.name }));
+}
+
 const dependencyMap = m => Object.fromEntries((m.modules?.list || []).map(x => [x.path, x.version]));
 
 // changes summarises what moving from one release to another brings, from
 // the manifests of every stable release between them.
 export function changes(releases, from, to, platform) {
   const span = releases.filter(r => !r.prerelease && compareVersions(r.version, from.version) > 0 && compareVersions(r.version, to.version) <= 0);
-  const out = { span, api: [], deps: [], go: null, size: null, retracted: span.filter(r => r.retracted), missing: span.filter(r => !r.manifest) };
+  const out = { span, api: [], deps: [], go: null, size: null, retracted: span.filter(r => r.retracted), missing: span.filter(r => r.manifest === undefined) };
   for (const r of span) {
     for (const c of r.manifest?.api_changes || []) out.api.push({ ...c, tag: r.tag });
   }

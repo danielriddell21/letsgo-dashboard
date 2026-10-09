@@ -79,7 +79,7 @@ function renderFooter() {
 
 // Releases arrive while someone is typing, and each one re-renders the page.
 // The fields below keep what was typed, and focus and the cursor stay put.
-const TYPED = ['hash-in', 'add-spec', 'owner-in', 'token-in'];
+const TYPED = ['hash-in', 'owner-in', 'token-in'];
 
 function captureInputs() {
   const el = document.activeElement;
@@ -125,14 +125,42 @@ function watch(id) {
     ui.notice = 'Enter owner/repo, or owner/repo@prefix/ for one module of a monorepo.';
     return false;
   }
-  if (isStatic() && !session.config.defaults.includes(spec.id)) {
-    ui.notice = 'This site only shows the projects it lists.';
-    return false;
-  }
   const ids = watched().map(s => s.id);
   if (!ids.includes(spec.id)) setWatched([...ids, spec.id]);
   ui.notice = '';
   return true;
+}
+
+// ---------- search
+
+let searchTimer = 0;
+const SEARCH_DELAY = 400;
+
+// runSearch looks up what is typed, unless it is already an exact name (which
+// is offered as it stands) or too short to mean anything. An answer that
+// arrives after the text has changed is dropped.
+async function runSearch() {
+  clearTimeout(searchTimer);
+  const s = ui.search, q = s.q.trim();
+  if (q.length < 2 || core.parseSpec(q)) {
+    Object.assign(s, { status: 'idle', results: [], error: '' });
+    schedule();
+    return;
+  }
+  Object.assign(s, { status: 'loading', error: '' });
+  schedule();
+  try {
+    const found = await github.search(q);
+    if (s.q.trim() === q) Object.assign(s, { status: 'done', results: found });
+  } catch (e) {
+    if (s.q.trim() === q) Object.assign(s, { status: 'error', results: [], error: e.message });
+  }
+  schedule();
+}
+
+function queueSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => runSearch().catch(console.error), SEARCH_DELAY);
 }
 
 async function listRepos(load) {
@@ -312,9 +340,7 @@ document.addEventListener('click', ev => {
 });
 
 const SUBMITS = {
-  add: () => {
-    if (watch($('#add-spec').value)) location.hash = '#/';
-  },
+  search: () => runSearch().catch(console.error),
   owner: () => {
     const owner = $('#owner-in').value.trim();
     ui.addOwner = owner;
@@ -373,6 +399,10 @@ document.addEventListener('change', ev => {
 
 // What is typed into a field that a re-render would otherwise reset.
 const INPUTS = {
+  search: value => {
+    ui.search.q = value;
+    queueSearch();
+  },
   dep: value => { ui.dep = value; },
   draft: value => { ui.draft = value; },
 };
@@ -423,12 +453,6 @@ async function readConfig() {
   }
 }
 
-// keepListed drops watched projects a static site doesn't carry.
-function keepListed() {
-  const s = settings.get();
-  if (s.projects) settings.set({ projects: s.projects.filter(id => session.config.defaults.includes(id)) });
-}
-
 async function restoreUser() {
   if (!token.get() || isStatic()) return;
   try {
@@ -442,8 +466,7 @@ async function restoreUser() {
 
 applyTheme();
 await readConfig();
-useStaticData(isStatic());
-if (isStatic()) keepListed();
+useStaticData(isStatic(), session.config.defaults);
 await oauthReturn();
 await restoreUser();
 render();

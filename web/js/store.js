@@ -29,6 +29,7 @@ function remove(key) {
 // Modules are the pieces the overview and project pages are made of. Each
 // can be shown, hidden and reordered in Settings.
 export const OVERVIEW_MODULES = [
+  { id: 'search', title: 'Search and pin' },
   { id: 'attention', title: 'Needs attention' },
   { id: 'projects', title: 'Projects' },
   { id: 'recent', title: 'Recent releases' },

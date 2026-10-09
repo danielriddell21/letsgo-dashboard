@@ -1,11 +1,11 @@
 // Adding a project, signing in, and settings.
 
-import * as core from '../core.js';
 import { h, icon } from '../dom.js';
 import { settings, token, OVERVIEW_MODULES, PROJECT_SECTIONS } from '../store.js';
 import { session, ui, isStatic } from '../state.js';
 import { watched } from '../projects.js';
-import { flash, blank, pageHead, spinner, external, projectHref } from '../ui.js';
+import { flash, blank, pageHead, spinner, projectHref, pinButton } from '../ui.js';
+import { searchModule } from './search.js';
 import { PLATFORMS, platform } from './project.js';
 
 export const notFound = () => blank('Page not found', h('a', { href: '#/' }, 'Back to the overview'));
@@ -13,20 +13,10 @@ export const notFound = () => blank('Page not found', h('a', { href: '#/' }, 'Ba
 const notice = () => (ui.notice ? flash('attention', 'alert', ui.notice) : null);
 
 function watchRow(id, description, isPrivate) {
-  const on = watched().some(s => s.id === id);
   return h('div', { class: 'Box-row' },
-    h('div', { class: 'Box-row-grow' }, h('b', {}, id), isPrivate ? [' ', h('span', { class: 'Label' }, 'Private')] : null,
+    h('div', { class: 'Box-row-grow' }, h('a', { href: `#/p/${encodeURIComponent(id)}` }, h('b', {}, id)), isPrivate ? [' ', h('span', { class: 'Label' }, 'Private')] : null,
       description ? h('div', { class: 'small muted' }, description) : null),
-    on ? h('span', { class: 'small muted' }, 'Watching') : h('button', { class: 'btn btn-sm', 'data-action': 'watch', 'data-project': id }, 'Watch'));
-}
-
-function staticAddPage() {
-  const specs = session.config.defaults.map(core.parseSpec).filter(Boolean);
-  return h('div', { class: 'narrow' },
-    pageHead('Projects on this site', 'This site shows public projects, refreshed by its CI. To watch any repository, including private ones you can read, ',
-      external('https://github.com/danielriddell21/letsgo-dashboard#run-it', 'run the dashboard yourself'), '.'),
-    notice(),
-    h('div', { class: 'Box' }, specs.map(s => watchRow(s.id))));
+    pinButton(id, watched().some(s => s.id === id)));
 }
 
 function repoList() {
@@ -37,16 +27,9 @@ function repoList() {
   return h('div', { class: 'Box' }, repos.map(r => watchRow(r.full_name, r.description, r.private)));
 }
 
-export function addPage() {
-  if (isStatic()) return staticAddPage();
-  return h('div', { class: 'narrow' },
-    pageHead('Add a project'),
-    notice(),
-    h('form', { class: 'stack', 'data-form': 'add' },
-      h('label', { class: 'form-label', for: 'add-spec' }, 'Repository'),
-      h('div', { class: 'input-group' },
-        h('input', { class: 'form-control mono', id: 'add-spec', type: 'text', placeholder: 'owner/repo, or owner/repo@cli/ for a monorepo module', autocomplete: 'off' }),
-        h('button', { class: 'btn btn-primary', type: 'submit' }, 'Watch'))),
+function ownerForm() {
+  if (isStatic()) return null;
+  return [
     h('form', { class: 'stack', 'data-form': 'owner' },
       h('label', { class: 'form-label', for: 'owner-in' }, "Browse an owner's repositories"),
       h('div', { class: 'input-group' },
@@ -54,7 +37,12 @@ export function addPage() {
         h('button', { class: 'btn', type: 'submit' }, 'List')),
       session.user ? h('p', { class: 'small' }, h('button', { class: 'btn btn-sm', type: 'button', 'data-action': 'my-repos' }, 'List repositories I can read')) : null),
     ui.ownerError ? flash('danger', 'alert', ui.ownerError) : null,
-    repoList());
+    repoList(),
+  ];
+}
+
+export function addPage() {
+  return h('div', { class: 'narrow' }, pageHead('Pin a project'), notice(), searchModule(), ownerForm());
 }
 
 export function signInPage() {
@@ -113,14 +101,14 @@ function watchedSection() {
   const rows = watched().map(sp => h('div', { class: 'Box-row' },
     h('a', { class: 'Box-row-grow mono', href: projectHref(sp) }, sp.id),
     h('button', { class: 'btn btn-sm', 'data-action': 'unwatch', 'data-project': sp.id }, 'Remove')));
-  return section('Watched projects',
+  return section('Pinned projects',
     h('div', { class: 'Box' }, rows.length ? rows : h('div', { class: 'Box-row muted' }, 'None yet.')),
-    h('div', {}, h('a', { class: 'btn btn-sm', href: '#/add' }, icon('plus'), 'Add project')));
+    h('div', {}, h('a', { class: 'btn btn-sm', href: '#/add' }, icon('plus'), 'Pin a project')));
 }
 
 function shareSection() {
   return section('Share your setup',
-    h('p', { class: 'small muted' }, 'Your watched projects and layout, without your token. Paste it into another browser to set it up the same way.'),
+    h('p', { class: 'small muted' }, 'Your pinned projects and layout, without your token. Paste it into another browser to set it up the same way.'),
     h('textarea', { class: 'form-control mono', id: 'settings-json', rows: '6', 'aria-label': 'Settings', 'data-input': 'draft' }, ui.draft ?? settings.export()),
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-sm', 'data-copy-from': 'settings-json' }, 'Copy'),

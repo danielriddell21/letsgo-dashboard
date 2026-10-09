@@ -42,6 +42,21 @@ export const labelEl = (text, variant) => h('span', { class: variant ? `Label La
 
 export const youUse = (p, r) => (settings.get().have[p.id] === r.tag ? [' ', labelEl('You use', 'accent')] : null);
 
+// pinButton pins or unpins a repository by name, like GitHub's Star button.
+export function pinButton(id, isPinned) {
+  return isPinned
+    ? h('button', { class: 'btn btn-sm', 'data-action': 'unwatch', 'data-project': id }, 'Unpin')
+    : h('button', { class: 'btn btn-sm', 'data-action': 'watch', 'data-project': id }, icon('plus'), 'Pin');
+}
+
+// supportLabel says whether a project was released with letsgo: green when it
+// was, so the supported ones stand out.
+export function supportLabel(p) {
+  if (p.status !== 'ready') return null;
+  if (p.supported) return h('span', { class: 'Label Label--success', title: 'Released with letsgo: audits, provenance and dependencies are shown' }, icon('check'), 'letsgo');
+  return h('span', { class: 'Label', title: 'Not released with letsgo: releases and downloads only' }, 'Releases only');
+}
+
 export function projectName(p) {
   return [p.owner, '/', h('b', {}, p.repo), p.prefix ? [' ', labelEl(p.prefix)] : null];
 }

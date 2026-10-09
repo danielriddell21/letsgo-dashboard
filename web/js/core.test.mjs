@@ -84,3 +84,33 @@ test('an asset ID is a positive integer', () => {
   assert.equal(core.assetID(7), '7');
   for (const bad of ['0', '-1', '1.5', 'x', '1/../2', '', '9007199254740993']) assert.throws(() => core.assetID(bad), bad);
 });
+
+test('file names are matched to a platform by the words in them', () => {
+  const yes = (f, p) => assert.equal(core.matchesPlatform(f, p), true, `${f} for ${p}`);
+  const no = (f, p) => assert.equal(core.matchesPlatform(f, p), false, `${f} for ${p}`);
+  yes('gh_2.60.0_linux_amd64.tar.gz', 'linux/amd64');
+  yes('tool-x86_64-unknown-linux-gnu.tar.gz', 'linux/amd64');
+  yes('tool_Darwin_arm64.tar.gz', 'darwin/arm64');
+  yes('tool-macos-universal.zip', 'darwin/arm64');
+  yes('tool-macos-universal.zip', 'darwin/amd64');
+  yes('tool_windows_amd64.zip', 'windows/amd64');
+  yes('tool-setup.exe', 'windows/amd64');
+  no('gh_2.60.0_linux_arm64.tar.gz', 'linux/amd64');
+  no('tool_Darwin_arm64.tar.gz', 'linux/arm64');
+  no('checksums.txt', 'linux/amd64');
+  no('tool_linux_amd64.tar.gz', 'windows/amd64');
+});
+
+test('only GitHub digests that are SHA-256 are used to check a file', () => {
+  const sum = 'a'.repeat(64);
+  assert.deepEqual(core.fileDigests([{ name: 'a', digest: 'sha256:' + sum }, { name: 'b', digest: 'sha1:abc' }, { name: 'c' }, { name: 'd', digest: 'sha256:short' }]),
+    [{ sha256: sum, what: 'release file', file: 'a' }]);
+  assert.deepEqual(core.fileDigests(undefined), []);
+});
+
+test('a release without a letsgo.json says so instead of looking healthy', () => {
+  const r = { tag: 'v1.0.0', version: core.parseTag('v1.0.0'), prerelease: false, retracted: null, hasManifest: false, manifest: null, audit: null };
+  assert.equal(core.status(r).label, 'Not made with letsgo');
+  assert.equal(core.status({ ...r, hasManifest: true }).label, 'Not audited');
+  assert.equal(core.status({ ...r, retracted: { reason: 'x' } }).label, 'Retracted');
+});

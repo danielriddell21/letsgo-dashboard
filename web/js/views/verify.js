@@ -1,5 +1,5 @@
 // Verify a file: hash it in the browser and look the digest up in every
-// manifest of every watched project.
+// manifest and release file of every pinned project.
 
 import * as core from '../core.js';
 import { h } from '../dom.js';
@@ -32,9 +32,9 @@ export function findDigest(hash) {
 }
 
 function matchIn(r, hash) {
-  if (!r.manifest) return null;
-  if (r.sha256 === hash) return { what: 'manifest', file: 'letsgo.json' };
-  return core.digests(r.manifest).find(x => x.sha256 === hash) || null;
+  if (r.manifest && r.sha256 === hash) return { what: 'manifest', file: 'letsgo.json' };
+  const fromManifest = r.manifest ? core.digests(r.manifest) : [];
+  return [...fromManifest, ...core.fileDigests(r.files)].find(x => x.sha256 === hash) || null;
 }
 
 function found({ p, r, d }, hash) {
@@ -56,7 +56,7 @@ function result() {
   if (match.state === 'loading') return h('div', { class: 'flash accent' }, spinner(), h('span', {}, "Reading every release's manifest…"));
   if (match.state === 'found') return found(match, c.hash);
   const subject = c.name ? `${c.name} does` : 'This hash does';
-  return flash('danger', 'alert', [h('b', {}, 'Not recognised. '), `${subject} not match any release of a watched project. Don't run it.`, h('div', { class: 'hash' }, c.hash)]);
+  return flash('danger', 'alert', [h('b', {}, 'Not recognised. '), `${subject} not match any release of a pinned project. Don't run it.`, h('div', { class: 'hash' }, c.hash)]);
 }
 
 export function verifyModule(full) {
@@ -72,7 +72,7 @@ export function verifyModule(full) {
       result()),
   });
   if (!full) return b;
-  return h('div', { class: 'narrow' }, pageHead('Verify a file', 'Check that a file you downloaded is one a watched project published, and whether that release is still safe to use.'), b);
+  return h('div', { class: 'narrow' }, pageHead('Verify a file', 'Check that a file you downloaded is one a pinned project published, and whether that release is still safe to use.'), b);
 }
 
 export async function hashFile(f) {

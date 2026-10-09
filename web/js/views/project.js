@@ -8,7 +8,7 @@ import { ui } from '../state.js';
 import { watched, have, ensure, ensureAudits } from '../projects.js';
 import {
   box, table, flash, blank, spinner, stateEl, statusOf, cmd, copyButton, external, githubLink, vulnLink,
-  labelEl, haveSelect,
+  labelEl, haveSelect, supportLabel,
 } from '../ui.js';
 
 export const PLATFORMS = ['darwin/arm64', 'darwin/amd64', 'linux/amd64', 'linux/arm64', 'windows/amd64', 'windows/arm64'];
@@ -27,13 +27,14 @@ const repoPath = p => `${encodeURIComponent(p.owner)}/${encodeURIComponent(p.rep
 function header(p) {
   const watching = watched().some(s => s.id === p.id);
   const button = watching
-    ? h('button', { class: 'btn btn-sm', 'data-action': 'unwatch', 'data-project': p.id }, 'Stop watching')
-    : h('button', { class: 'btn btn-sm btn-primary', 'data-action': 'watch', 'data-project': p.id }, 'Watch');
+    ? h('button', { class: 'btn btn-sm', 'data-action': 'unwatch', 'data-project': p.id }, 'Unpin')
+    : h('button', { class: 'btn btn-sm btn-primary', 'data-action': 'watch', 'data-project': p.id }, 'Pin');
   return [
     h('div', { class: 'row' },
       p.meta?.avatar ? h('img', { class: 'avatar avatar-md', src: p.meta.avatar, alt: '' }) : null,
       h('h1', {}, githubLink(encodeURIComponent(p.owner), p.owner), ' / ', githubLink(repoPath(p), h('b', {}, p.repo))),
       p.prefix ? labelEl(p.prefix) : null,
+      supportLabel(p),
       p.meta?.private ? h('span', { class: 'Label' }, icon('lock'), ' Private') : null,
       h('span', { class: 'grow' }),
       button),
@@ -104,9 +105,53 @@ function installTabs(p, r) {
   return tabs;
 }
 
+// ---------- releases not made with letsgo, or whose manifest can't be read
+
+function fileRow(f) {
+  const sum = f.digest.startsWith('sha256:') ? f.digest.slice('sha256:'.length) : '';
+  return h('tr', {},
+    h('td', { class: 'mono' }, f.url ? external(f.url, f.name) : f.name),
+    h('td', { class: 'r nowrap' }, core.formatSize(f.size)),
+    h('td', { class: 'nowrap' }, sum ? [h('code', { title: sum }, sum.slice(0, 12)), copyButton(sum, 'Copy SHA-256')] : h('span', { class: 'muted' }, 'none')));
+}
+
+function filesBody(p, r) {
+  if (!r.files.length) return h('p', { class: 'muted' }, 'This release has no files attached.');
+  const plat = platform();
+  const mine = r.files.filter(f => core.matchesPlatform(f.name, plat)), rest = r.files.filter(f => !mine.includes(f));
+  const privateDownload = p.meta?.private && mine.length
+    ? [cmd(`gh release download ${r.tag} -R ${p.owner}/${p.repo} -p ${mine[0].name}`), h('p', { class: 'small muted' }, 'Private repository: download with your GitHub sign-in.')]
+    : null;
+  const otherLabel = mine.length ? 'Other files' : 'All files';
+  return [
+    h('span', { class: 'small muted' }, mine.length ? `Files that look like ${plat}` : `No file looks like ${plat}; all files are below.`),
+    mine.length ? h('div', { class: 'Box' }, h('table', { class: 'Table' }, h('tbody', {}, mine.map(fileRow)))) : null,
+    privateDownload,
+    rest.length ? h('details', { open: !mine.length }, h('summary', { class: 'small muted' }, `${otherLabel} (${rest.length})`),
+      h('div', { class: 'Box' }, h('table', { class: 'Table' }, h('tbody', {}, rest.map(fileRow))))) : null,
+    h('p', { class: 'small muted' }, "The SHA-256 is GitHub's, for the file as uploaded."),
+  ];
+}
+
+function limitedNote(r) {
+  if (!r.hasManifest) return 'Not made with letsgo, so there are no audits, provenance or dependencies to show. Versions, downloads and the file check still work.';
+  return [
+    "This release was made with letsgo, but this site can't read its manifest, so audits, provenance and dependencies aren't shown. ",
+    external('https://github.com/danielriddell21/letsgo-dashboard#run-it', 'Run the dashboard server'), ' for the full view.',
+  ];
+}
+
+function limitedInstall(p, r) {
+  return box({
+    title: `Download ${r.tag}`,
+    actions: r.url ? external(r.url, h('span', { class: 'small' }, 'Release page')) : null,
+    body: h('div', { class: 'Box-body stack' }, h('p', { class: 'small muted' }, limitedNote(r)), filesBody(p, r)),
+  });
+}
+
 function installSection(p, r) {
   if (r.manifest === undefined) return box({ title: `Install ${r.tag}`, body: h('div', { class: 'Box-body' }, spinner()) });
-  if (!r.manifest) return flash('attention', 'alert', `This release's manifest couldn't be read: ${r.manifestError || ''}`);
+  if (!r.manifest) return limitedInstall(p, r);
   const tabs = installTabs(p, r);
   const current = tabs.find(t => t[0] === ui.tab) || tabs[0];
   return box({
@@ -144,6 +189,9 @@ function changeItems(p, from, to) {
 function changesSection(p, from, to) {
   if (!from || !to || core.compareVersions(to.version, from.version) <= 0) return null;
   const title = `Changes from ${from.tag} to ${to.tag}`;
+  if (from.manifest === null || to.manifest === null) {
+    return box({ title, body: h('div', { class: 'Box-body muted' }, "What changed isn't listed: it needs both releases to have been made with letsgo.") });
+  }
   if (!from.manifest || !to.manifest) return box({ title, body: h('div', { class: 'Box-body' }, spinner()) });
   const { items, span } = changeItems(p, from, to);
   const body = items.length
@@ -252,13 +300,11 @@ function versionsSection(p, sel, mine) {
   const all = ui.allVersions || settings.get().prereleases;
   const list = p.releases.filter(r => all || !r.prerelease || r === sel || r === mine);
   const shown = ui.allVersions ? list : list.slice(0, 15);
-  const hidden = p.other ? [`${core.plural(p.other, 'release')} without a `, h('code', {}, 'letsgo.json'), ' not shown.'] : null;
   return box({
     title: 'Versions',
     counter: p.releases.length,
     actions: h('button', { class: 'btn btn-sm', 'data-action': 'all-versions' }, ui.allVersions ? 'Show fewer' : 'Show all, with pre-releases'),
     body: table(null, shown.map(r => versionRow(p, r, sel, mine))),
-    footer: hidden,
   });
 }
 
@@ -361,8 +407,8 @@ function notReady(p) {
   if (p.status !== 'ready') return h('p', {}, spinner(), ' Loading releases…');
   if (p.releases.length) return null;
   const scope = p.prefix ? 'module' : 'repository';
-  const others = p.other ? `, out of ${core.plural(p.other, 'release')} in scope` : '';
-  return h('div', { class: 'Box' }, blank('No releases made with letsgo', `None of this ${scope}'s releases has a `, h('code', {}, 'letsgo.json'), `${others}.`));
+  const tagged = p.prefix ? ` tagged ${p.prefix}vX.Y.Z` : '';
+  return h('div', { class: 'Box' }, blank('No releases', `This ${scope} has no published releases${tagged}.`));
 }
 
 export function projectPage(p) {

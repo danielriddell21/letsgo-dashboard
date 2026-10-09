@@ -182,3 +182,12 @@ pre.art { margin: 0; font-size: 12px; line-height: 1.2; color: var(--fg-muted); 
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 .module-list .Box-row { gap: 8px; }
 .grow { flex: 1; }
+
+/* search and pin */
+.search-field { position: relative; }
+.search-field svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--fg-muted); pointer-events: none; }
+.search-field .form-control { width: 100%; padding-left: 32px; }
+.result-line { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.result-meta { display: inline-flex; gap: 4px; align-items: center; }
+.Label svg { margin-right: 4px; }
+.Box-row { flex-wrap: nowrap; }

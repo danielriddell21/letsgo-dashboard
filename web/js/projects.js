@@ -19,13 +19,24 @@ export function watched() {
 }
 export function setWatched(ids) { settings.set({ projects: ids }); }
 export function forgetProjects() { projects.clear(); }
+// pinned is the watched projects in the order the overview lists them:
+// those released with letsgo first, then those still loading, then the rest,
+// each group in the order they were pinned.
+export function pinned() {
+  const rank = p => {
+    if (p.status === 'ready') return p.supported ? 0 : 2;
+    return p.status === 'error' ? 2 : 1;
+  };
+  return watched().map(project).map((p, i) => ({ p, i })).sort((a, b) => rank(a.p) - rank(b.p) || a.i - b.i).map(x => x.p);
+}
+
 export const have = p => p.byTag[settings.get().have[p.id]] || null;
 
 // project returns a project's state, starting its load the first time.
 export function project(spec) {
   let p = projects.get(spec.id);
   if (!p) {
-    p = { ...spec, status: 'idle', error: '', meta: null, releases: [], byTag: {}, other: 0 };
+    p = { ...spec, status: 'idle', error: '', meta: null, releases: [], byTag: {}, supported: false };
     projects.set(spec.id, p);
     loadProject(p).catch(reportError);
   }
@@ -36,10 +47,11 @@ export const findProject = id => projects.get(id);
 function toRelease(p, x) {
   const version = core.parseTag(x.tag, p.prefix);
   if (x.draft || !version) return null;
+  const hasManifest = 'letsgo.json' in x.assets;
   return {
     tag: x.tag, version, prerelease: version.pre.length > 0, retracted: core.readNotice(x.body),
     url: x.url?.startsWith('https://') ? x.url : '', published: x.published, assets: x.assets,
-    hasManifest: 'letsgo.json' in x.assets, manifest: undefined, audit: 'audit.json' in x.assets ? undefined : null,
+    files: x.files || [], hasManifest, manifest: hasManifest ? undefined : null, audit: 'audit.json' in x.assets ? undefined : null,
   };
 }
 
@@ -59,8 +71,8 @@ export async function loadProject(p, fresh) {
     const [meta, list] = await Promise.all([readMeta(p), github.releases(p.owner, p.repo, fresh)]);
     const releases = list.map(x => toRelease(p, x)).filter(Boolean).sort((a, b) => core.compareVersions(b.version, a.version));
     p.meta = meta;
-    p.other = releases.filter(r => !r.hasManifest).length;
-    p.releases = releases.filter(r => r.hasManifest);
+    p.releases = releases;
+    p.supported = releases.some(r => r.hasManifest);
     p.byTag = Object.fromEntries(p.releases.map(r => [r.tag, r]));
     p.status = 'ready';
     p.error = '';

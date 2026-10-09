@@ -99,6 +99,24 @@ func TestProxyUsesThePublicTokenForAnonymousViewers(t *testing.T) {
 	}
 }
 
+func TestProxyRelaysRepositorySearchWithOnlyItsOwnParameters(t *testing.T) {
+	u := newUpstream(t)
+	srv := u.server(Config{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/gh/search/repositories?q=letsgo+user%3Adanielriddell21&per_page=10&sort=stars&secret=x", "viewer")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	last := u.seen[len(u.seen)-1]
+	if last.URL.Path != "/search/repositories" {
+		t.Errorf("path upstream = %q", last.URL.Path)
+	}
+	if got := last.URL.Query(); got.Get("q") != "letsgo user:danielriddell21" || got.Get("per_page") != "10" || got.Get("secret") != "" {
+		t.Errorf("query upstream = %v", got)
+	}
+}
+
 func TestProxyRefusesEverythingElse(t *testing.T) {
 	u := newUpstream(t)
 	srv := u.server(Config{})

@@ -25,7 +25,7 @@ func fakeGitHub(t *testing.T, private bool) *httptest.Server {
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{
 					"tag_name": "v1.0.0", "html_url": "https://github.com/o/r/releases/tag/v1.0.0", "published_at": "2026-10-01T00:00:00Z", "body": "notes",
-					"assets": []map[string]any{{"id": 1, "name": "letsgo.json"}, {"id": 2, "name": "audit.json"}, {"id": 3, "name": "r_linux_amd64.tar.gz"}},
+					"assets": []map[string]any{{"id": 1, "name": "letsgo.json"}, {"id": 2, "name": "audit.json"}, {"id": 3, "name": "r_linux_amd64.tar.gz", "size": 99, "digest": "sha256:abc", "browser_download_url": "https://github.com/o/r/releases/download/v1.0.0/r_linux_amd64.tar.gz"}},
 				},
 				{"tag_name": "v1.1.0", "draft": true, "assets": []map[string]any{{"id": 9, "name": "letsgo.json"}}},
 			})
@@ -74,6 +74,9 @@ func TestWriteBuildsAStaticSite(t *testing.T) {
 	var releases []Release
 	if err := json.Unmarshal([]byte(read("data/o/r/releases.json")), &releases); err != nil || len(releases) != 1 || releases[0].Assets["letsgo.json"] != 1 {
 		t.Errorf("releases = %+v (%v); drafts must be left out", releases, err)
+	}
+	if f := releases[0].Files; len(f) != 3 || f[2].Name != "r_linux_amd64.tar.gz" || f[2].Digest != "sha256:abc" || f[2].Size != 99 || !strings.HasPrefix(f[2].URL, "https://") {
+		t.Errorf("files = %+v; the releases-only view needs each file's name, size, digest and URL", f)
 	}
 	if cfg := read("api/config"); !strings.Contains(cfg, `"mode":"static"`) || !strings.Contains(cfg, `"o/r@cli/"`) {
 		t.Errorf("config = %s", cfg)

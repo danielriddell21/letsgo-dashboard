@@ -54,7 +54,7 @@ jobs:
       - name: snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PAGES_REPOS: ${{ vars.PAGES_REPOS || 'danielriddell21/letsgo' }}
+          PAGES_REPOS: ${{ vars.PAGES_REPOS || 'danielriddell21/letsgo danielriddell21/letsgo-dashboard' }}
         run: |
           set -euo pipefail
           # shellcheck disable=SC2086 # one argument per project, by design

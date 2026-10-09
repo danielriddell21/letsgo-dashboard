@@ -37,6 +37,7 @@ var routes = []route{
 	{path: regexp.MustCompile(`^/users/` + name + `/repos$`), query: []string{"per_page", "page", "type", "sort"}},
 	{path: regexp.MustCompile(`^/orgs/` + name + `/repos$`), query: []string{"per_page", "page", "type", "sort"}},
 	{path: regexp.MustCompile(`^/user/repos$`), query: []string{"per_page", "page", "affiliation", "sort"}},
+	{path: regexp.MustCompile(`^/search/repositories$`), query: []string{"q", "per_page", "page", "sort", "order"}},
 }
 
 func matchRoute(path string) (route, bool) {
