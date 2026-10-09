@@ -37,6 +37,26 @@ the way it checks everyone else's: `letsgo verify --repo
 danielriddell21/letsgo-dashboard`. The image is built by letsgo from the
 same reproducible linux binaries, on a distroless base pinned by digest.
 
+## On GitHub Pages
+
+The dashboard can also be published as a static site for **public**
+repositories, with nothing running behind it:
+
+```sh
+letsgo-dashboard snapshot -o site owner/repo owner/other@cli/
+```
+
+writes the page and each project's release data (its release list, and each
+release's `letsgo.json` and `audit.json`, byte for byte) into `site/`.
+Viewers choose which of those projects to watch; everything else works as on
+the server, except sign-in and adding other repositories. A private
+repository is refused, because a Pages site is public.
+
+This repository publishes one: `pages.yml` runs after CI passes on trunk and
+every six hours, for the projects in the `PAGES_REPOS` repository variable
+(default `danielriddell21/letsgo`). Turn it on under Settings → Pages →
+Source: GitHub Actions.
+
 ## What is stored, and where
 
 The server stores nothing: no database, no sessions, no logs of tokens. It
