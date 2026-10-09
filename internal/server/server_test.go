@@ -28,12 +28,12 @@ func newUpstream(t *testing.T) *upstream {
 	}))
 	u.api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u.seen = append(u.seen, r)
-		switch {
-		case r.URL.Path == "/repos/o/r/releases/assets/7":
+		switch r.URL.Path {
+		case "/repos/o/r/releases/assets/7":
 			http.Redirect(w, r, u.assets.URL+"/signed/7?sig=abc", http.StatusFound)
-		case r.URL.Path == "/repos/o/r/releases/assets/8":
+		case "/repos/o/r/releases/assets/8":
 			http.Redirect(w, r, "http://evil.test/8", http.StatusFound)
-		case r.URL.Path == "/login/oauth/access_token":
+		case "/login/oauth/access_token":
 			_ = r.ParseForm()
 			u.exchanged = r.PostForm
 			_, _ = w.Write([]byte(`{"access_token":"gho_user"}`))

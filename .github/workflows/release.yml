@@ -1,0 +1,74 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+  # Releasing by hand is occasionally necessary: a tag that was pushed before
+  # the workflow existed, or a run that failed for a reason since fixed.
+  # Re-running is safe because publishing is idempotent.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release"
+        required: true
+
+permissions:
+  # Creating the release and attaching assets.
+  contents: write
+
+  # The container image. letsgo pushes to ghcr.io with the forge token, so
+  # no second credential is needed.
+  packages: write
+
+  # Provenance, signed with a short-lived identity minted for this run.
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          # The tag being released must be present for letsgo to read the
+          # version from it. The history is read from the API when shallow.
+          fetch-tags: true
+
+      # The toolchain is a build input: read the exact patch version from
+      # go.mod so CI and the release build with the same one.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: false
+
+      # Everything cheap happens before anything expensive. A misconfigured
+      # release fails here, in seconds, with nothing built or published.
+      - name: plan
+        uses: danielriddell21/letsgo-action@v1
+        with:
+          command: plan
+          args: --publish
+
+      - name: release
+        uses: danielriddell21/letsgo-action@v1
+        with:
+          command: release
+
+      - name: attest provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+      # Kept for inspection when a run needs explaining. The artifacts are
+      # reproducible, so this is a convenience rather than the only copy.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: ignore
+          retention-days: 7

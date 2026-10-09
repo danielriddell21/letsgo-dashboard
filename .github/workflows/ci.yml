@@ -3,58 +3,32 @@ name: ci
 on:
   push:
     branches: [trunk]
-    tags: ["v*"]
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - run: go vet ./...
-      - run: go test ./...
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-      - run: node --test 'web/js/*.test.mjs'
-
-  # Builds the image on every change; pushes it to GHCR from trunk and tags.
-  image:
-    needs: test
-    runs-on: ubuntu-latest
+  # Vet, lint, build and test, then tag a release candidate on trunk: the
+  # shared workflow the other repos call, as letsgo's own CI does.
+  #
+  # The page's JavaScript tests run inside `go test` (main_test.go), so they
+  # gate tagging alongside the Go ones.
+  ci:
+    uses: danielriddell21/github-actions/.github/workflows/ci.yaml@v2
     permissions:
       contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ github.ref_name }}
+    with:
+      vet: true
+
+      # The dashboard publishes an image, so trunk tags a release candidate
+      # and promote.yml publishes the stable version when the pre-release
+      # checkbox is unticked on GitHub.
+      pre: true
+
+      # No .gremlins.yaml yet.
+      mutate: false
+
+      # Off until CODECOV_TOKEN is set on this repository.
+      coverage: false
+    secrets:
+      # A tag pushed with the workflow token starts no workflow, so
+      # release.yml would never fire. A token of its own does.
+      tag-token: ${{ secrets.TAG_TOKEN }}

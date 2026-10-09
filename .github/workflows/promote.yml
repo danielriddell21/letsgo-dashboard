@@ -1,0 +1,66 @@
+name: promote
+
+on:
+  # Unticking "Set as a pre-release" on a release candidate in the GitHub UI
+  # fires this event.
+  release:
+    types: [released]
+
+  # A failed promotion can be replayed by hand. Promoting refuses once the
+  # stable tag exists, so a second run is safe.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "RC tag to promote"
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  promote:
+    name: promote
+    # release: released also fires for an ordinary stable release; only a
+    # prerelease tag (one that carries a "-") is something to promote.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.release.tag_name, '-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+          # The "Prerelease history" section is built from local git.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: false
+
+      # letsgo promote tags the stable commit itself, which needs a git
+      # identity to record on the annotated tag.
+      - uses: ./.github/actions/champ-git-identity
+
+      - name: promote
+        uses: danielriddell21/letsgo-action@v1
+        with:
+          command: promote
+          args: --yes --work dist ${{ inputs.tag || github.event.release.tag_name }}
+
+      - name: attest provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/build/*.tar.gz
+            dist/build/*.zip
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: ignore
+          retention-days: 7

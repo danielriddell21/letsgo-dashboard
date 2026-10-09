@@ -105,9 +105,11 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // without the token: the redirect URL is already signed, and GitHub's token
 // must not reach another host.
 func (p *proxy) get(ctx context.Context, target, token, accept string, asset bool) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	// target is the configured API base plus a path that matched a route
+	// above, so it can't name another host.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil) //nolint:gosec // G704: path allowlisted in ServeHTTP
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("proxy: %w", err)
 	}
 	req.Header.Set("Accept", accept)
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -115,9 +117,9 @@ func (p *proxy) get(ctx context.Context, target, token, accept string, asset boo
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := p.client.Do(req)
+	resp, err := p.client.Do(req) //nolint:gosec // G704: path allowlisted in ServeHTTP
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("proxy: %w", err)
 	}
 	if !asset || (resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusMovedPermanently &&
 		resp.StatusCode != http.StatusTemporaryRedirect && resp.StatusCode != http.StatusSeeOther) {
@@ -129,17 +131,23 @@ func (p *proxy) get(ctx context.Context, target, token, accept string, asset boo
 	if err != nil || !p.assetHost(loc) {
 		return nil, fmt.Errorf("asset redirected to an unexpected host")
 	}
-	next, err := http.NewRequestWithContext(ctx, http.MethodGet, loc.String(), nil)
+	next, err := http.NewRequestWithContext(ctx, http.MethodGet, loc.String(), nil) //nolint:gosec // G704: host checked by assetHost
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("proxy: %w", err)
 	}
 	next.Header.Set("Accept", "application/octet-stream")
 	next.Header.Set("User-Agent", "letsgo-dashboard")
-	return p.client.Do(next)
+	resp, err = p.client.Do(next) //nolint:gosec // G704: host checked by assetHost
+	if err != nil {
+		return nil, fmt.Errorf("proxy: %w", err)
+	}
+	return resp, nil
 }
 
 func (p *proxy) assetHost(u *url.URL) bool {
-	if u.Scheme != "https" && !(u.Scheme == "http" && strings.HasPrefix(p.cfg.api(), "http://")) {
+	// Plain http only when the API itself is plain http, as a test server is.
+	plainOK := u.Scheme == "http" && strings.HasPrefix(p.cfg.api(), "http://")
+	if u.Scheme != "https" && !plainOK {
 		return false
 	}
 	host := u.Hostname()
