@@ -1,0 +1,72 @@
+name: pages
+
+# Publishes the dashboard to GitHub Pages as a static site for public
+# repositories: the page plus their release data, written by
+# `letsgo-dashboard snapshot`. Nothing runs behind it, so it can't show
+# private repositories and offers no sign-in; run the server for those.
+on:
+  # After CI passes on trunk, so the site is only ever code that passed.
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [trunk]
+
+  # Release data changes without a commit here: a project publishes, yanks or
+  # is audited. Refresh it on a schedule.
+  schedule:
+    - cron: "17 */6 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time; a newer one replaces a queued one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The commit CI passed, not whatever trunk has become since.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: false
+
+      # The projects the site shows: the PAGES_REPOS repository variable,
+      # comma- or space-separated owner/name or owner/name@prefix/. Each must
+      # be public; a private one fails the build rather than publishing it.
+      - name: snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PAGES_REPOS: ${{ vars.PAGES_REPOS || 'danielriddell21/letsgo' }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086 # one argument per project, by design
+          go run . snapshot -o site ${PAGES_REPOS//,/ }
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

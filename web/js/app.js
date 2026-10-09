@@ -4,12 +4,13 @@
 
 import * as core from './core.js';
 import { settings, token, cache, forgetEverything, OVERVIEW_MODULES, PROJECT_SECTIONS } from './store.js';
-import { github, ApiError } from './github.js';
+import { github, ApiError, useStaticData } from './github.js';
 
 const { esc } = core;
 const $ = sel => document.querySelector(sel);
 
-let CONFIG = { oauth: false, client_id: '', web: 'https://github.com', defaults: [], public_token: false, version: '' };
+let CONFIG = { mode: 'server', oauth: false, client_id: '', web: 'https://github.com', defaults: [], public_token: false, version: '', generated: '' };
+const isStatic = () => CONFIG.mode === 'static';
 let USER = null;
 const ui = { sel: {}, tab: 'download', fp: 'art', allVersions: false, dep: 'golang.org/x/', check: null, verifyLoading: false, addOwner: '', ownerRepos: null, ownerError: '', notice: '' };
 
@@ -169,7 +170,9 @@ function render() {
   const r = route();
   for (const a of document.querySelectorAll('#nav a')) a.setAttribute('aria-current', a.dataset.route === (r.name === 'overview' ? '' : r.name) ? 'page' : 'false');
   renderAccount();
-  $('#footer').innerHTML = `<span>letsgo dashboard ${esc(CONFIG.version)}</span><span>Your settings and token are kept in this browser only.</span><a href="#/settings">Settings</a><a href="https://github.com/danielriddell21/letsgo" target="_blank" rel="noopener">letsgo</a>`;
+  $('#footer').innerHTML = `<span>letsgo dashboard ${esc(CONFIG.version)}</span>${isStatic()
+    ? `<span>Release data as of ${esc(core.shortDate(CONFIG.generated))}. Your settings are kept in this browser only.</span>`
+    : '<span>Your settings and token are kept in this browser only.</span>'}<a href="#/settings">Settings</a><a href="https://github.com/danielriddell21/letsgo-dashboard" target="_blank" rel="noopener">Run your own</a>`;
 
   // Keep focus and the cursor in a text field across a re-render.
   const focused = document.activeElement && document.activeElement.id;
@@ -198,6 +201,7 @@ function render() {
 }
 
 function renderAccount() {
+  if (isStatic()) { $('#account').innerHTML = '<span class="Label">Public projects</span>'; return; }
   $('#account').innerHTML = USER
     ? `<img class="avatar avatar-sm" src="${esc(USER.avatar_url)}" alt=""><span class="small">${esc(USER.login)}</span><button class="btn btn-sm" data-action="signout">Sign out</button>`
     : token.get()
@@ -224,6 +228,7 @@ function statusOf(p, r) {
 
 function overviewPage() {
   const specs = watched();
+  if (!specs.length && isStatic()) return addPage();
   if (!specs.length) {
     return `<div class="Box"><div class="blankslate">
       <h2>Watch your first project</h2>
@@ -565,6 +570,14 @@ function fingerprintSection(p, r) {
 // ---------- add a project
 
 function addPage() {
+  if (isStatic()) {
+    return `<div class="narrow"><div class="Subhead"><h1 class="Subhead-heading">Projects on this site</h1></div>
+      <p class="muted">This site shows public projects, refreshed by its CI. To watch any repository, including private ones you can read, run the dashboard yourself: <a href="https://github.com/danielriddell21/letsgo-dashboard#run-it" target="_blank" rel="noopener">it's one container</a>.</p>
+      <div class="Box">${CONFIG.defaults.map(core.parseSpec).filter(Boolean).map(s => {
+        const on = watched().some(w => w.id === s.id);
+        return `<div class="Box-row"><a class="Box-row-grow mono" href="${projectHref(s)}">${esc(s.id)}</a>${on ? '<span class="small muted">Watching</span>' : `<button class="btn btn-sm" data-action="watch" data-project="${esc(s.id)}">Watch</button>`}</div>`;
+      }).join('')}</div></div>`;
+  }
   const repos = ui.ownerRepos;
   return `<div class="narrow">
     <div class="Subhead"><h1 class="Subhead-heading">Add a project</h1></div>
@@ -593,6 +606,7 @@ async function listRepos(load) {
 
 function watch(id) {
   const spec = core.parseSpec(id);
+  if (spec && isStatic() && !CONFIG.defaults.includes(spec.id)) { ui.notice = 'This site only shows the projects it lists.'; schedule(); return false; }
   if (!spec) { ui.notice = 'Enter owner/repo, or owner/repo@prefix/ for one module of a monorepo.'; schedule(); return false; }
   const ids = watched().map(s => s.id);
   if (!ids.includes(spec.id)) setWatched([...ids, spec.id]);
@@ -603,6 +617,7 @@ function watch(id) {
 // ---------- sign in
 
 function signInPage() {
+  if (isStatic()) return `<div class="blankslate"><h2>No sign-in here</h2><p>This site shows public projects only.</p></div>`;
   return `<div class="narrow">
     <div class="Subhead"><h1 class="Subhead-heading">Sign in</h1></div>
     <p class="muted">Public projects work without signing in. Sign in to see private repositories you have access to, and for a higher GitHub rate limit.</p>
@@ -638,7 +653,7 @@ async function oauthStart() {
   const st = b64url(crypto.getRandomValues(new Uint8Array(16)));
   sessionStorage.setItem('lgd:oauth', JSON.stringify({ state: st, verifier }));
   location.assign(`${CONFIG.web}/login/oauth/authorize?` + new URLSearchParams({
-    client_id: CONFIG.client_id, redirect_uri: location.origin + '/', state: st, code_challenge: challenge, code_challenge_method: 'S256',
+    client_id: CONFIG.client_id, redirect_uri: location.origin + location.pathname, state: st, code_challenge: challenge, code_challenge_method: 'S256',
   }));
 }
 async function oauthReturn() {
@@ -650,9 +665,9 @@ async function oauthReturn() {
   if (q.has('error')) { ui.notice = 'GitHub sign-in was cancelled.'; return; }
   if (!saved || saved.state !== q.get('state')) { ui.notice = 'Sign-in could not be confirmed. Try again.'; return; }
   try {
-    const res = await fetch('/api/oauth/token', {
+    const res = await fetch('api/oauth/token', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: q.get('code'), code_verifier: saved.verifier, redirect_uri: location.origin + '/' }),
+      body: JSON.stringify({ code: q.get('code'), code_verifier: saved.verifier, redirect_uri: location.origin + location.pathname }),
     });
     const j = await res.json();
     if (!res.ok || !j.access_token) throw new Error(j.message || 'no token');
@@ -782,7 +797,13 @@ window.addEventListener('hashchange', () => { ui.notice = ''; schedule(); window
 
 (async () => {
   applyTheme();
-  try { CONFIG = { ...CONFIG, ...(await (await fetch('/api/config')).json()) }; } catch { /* defaults */ }
+  try { CONFIG = { ...CONFIG, ...(await (await fetch('api/config', { cache: 'no-cache' })).json()) }; } catch { /* defaults */ }
+  useStaticData(isStatic());
+  if (isStatic()) {
+    // Only the projects this site carries can be shown.
+    const s = settings.get();
+    if (s.projects) settings.set({ projects: s.projects.filter(id => CONFIG.defaults.includes(id)) });
+  }
   await oauthReturn();
   if (token.get() && !USER) {
     try { USER = await github.user(); } catch (e) { if (e.status === 401) { token.clear(); ui.notice = 'Your sign-in expired. Sign in again.'; } }
