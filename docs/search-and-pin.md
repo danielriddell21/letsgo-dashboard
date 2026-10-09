@@ -1,6 +1,6 @@
 # Search and pin any public repository
 
-Status: building. This is the design the code follows.
+Status: built. This is the design the code follows.
 
 ## What it is for
 
@@ -48,6 +48,10 @@ GitHub's API answers browsers, but its release downloads don't, so a Pages site
 can read a repository's `letsgo.json` only if the build fetched it
 (`PAGES_REPOS`). A pinned repository outside the snapshot has its release list
 and files, and says that the full view needs the dashboard server.
+
+A Pages site knows which repositories its build fetched from its own
+configuration (`api/config`, the `PAGES_REPOS` list: by default letsgo and this
+dashboard), so it never has to probe for them.
 
 Anonymous browser requests share GitHub's 60 an hour per address. The page says
 so when it's reached, rather than failing silently. Search is 10 an hour.
