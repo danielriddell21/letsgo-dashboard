@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>letsgo dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%231f883d'/%3E%3Cpath d='M5 4.5 11 8l-6 3.5z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<header class="Header">
+  <div class="Header-in">
+    <div class="Header-top">
+      <a class="Header-logo" href="#/">
+        <svg width="24" height="24" viewBox="0 0 16 16" aria-hidden="true"><rect width="16" height="16" rx="4" fill="#1f883d"/><path d="M5 4.5 11 8l-6 3.5z" fill="#fff"/></svg>
+        <span>letsgo dashboard</span>
+      </a>
+      <div class="Header-right" id="account"></div>
+    </div>
+    <nav class="UnderlineNav" id="nav" aria-label="Dashboard">
+      <a href="#/" data-route="">Overview</a>
+      <a href="#/advisories" data-route="advisories">Advisories</a>
+      <a href="#/dependencies" data-route="dependencies">Dependencies</a>
+      <a href="#/verify" data-route="verify">Verify a file</a>
+      <a href="#/settings" data-route="settings">Settings</a>
+    </nav>
+  </div>
+</header>
+<main class="container" id="view"><p class="muted">Loading…</p></main>
+<footer class="footer" id="footer"></footer>
+<input type="file" id="file" hidden>
+<noscript><p class="container">The dashboard needs JavaScript.</p></noscript>
+</body>
+</html>
