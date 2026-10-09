@@ -68,11 +68,20 @@ Everything else is kept in your browser's local storage:
 | --- | --- |
 | watched projects, the version you use of each, theme, platform, layout | so the page is set up the way you left it |
 | your GitHub token, if you sign in | to read private repositories and get a higher rate limit |
-| GitHub responses (release lists, manifests, audits) | so a reload doesn't use your rate limit again |
 
-Settings shows how much is stored, and can clear the cache or remove
-everything. "Share your setup" exports your projects and layout, without your
-token, to paste into another browser.
+Both are checked when they're read back: a settings file or token that doesn't
+look like one is ignored, so a tampered browser store can't put anything but
+plain settings on the page.
+
+GitHub's responses are not written to local storage. They're held in memory
+for the visit, and the server lets your browser's own HTTP cache keep release
+files for a day (they never change for a given ID). That cache is keyed on
+your token, so a private repository's file isn't served again after you sign
+out.
+
+Settings can remove everything the dashboard stored. "Share your setup"
+exports your projects and layout, without your token, to paste into another
+browser.
 
 ## Signing in
 

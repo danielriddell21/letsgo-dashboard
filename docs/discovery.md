@@ -12,8 +12,8 @@
   module can be watched; no organisation is configured unless the deployment
   sets defaults.
 - **Live from GitHub, nothing stored on the server.** The browser reads each
-  release's `letsgo.json` and `audit.json` and keeps settings, token and a
-  cache in localStorage. A small server relays an allowlist of read-only
+  release's `letsgo.json` and `audit.json` and keeps only settings and token
+  in localStorage. A small server relays an allowlist of read-only
   GitHub calls, because GitHub's release downloads send no CORS headers, and
   handles "Sign in with GitHub" when configured.
 - **Private repositories** through each viewer's own GitHub access: a pasted
