@@ -43,6 +43,10 @@ type Options struct {
 	Version, Generated string
 
 	Client *http.Client
+
+	// RetryDelay is the pause before a second try, doubling-ish after that.
+	// Zero means a second.
+	RetryDelay time.Duration
 }
 
 // Files the release list keeps per release. Only these are copied.
@@ -214,12 +218,43 @@ func (o Options) getJSON(ctx context.Context, path string, v any) error {
 	return nil
 }
 
-// get reads one API path. An asset download redirects to another host; Go's
-// client drops the Authorization header when it follows that, as it should.
+// attempts is how many times a read is tried: GitHub answers an occasional
+// 5xx, and one of them shouldn't fail a scheduled build of hundreds of reads.
+const attempts = 4
+
+// get reads one API path, trying again after a network error, a 5xx or a
+// rate-limit answer. An asset download redirects to another host; Go's client
+// drops the Authorization header when it follows that, as it should.
 func (o Options) get(ctx context.Context, path, accept string) ([]byte, error) {
+	delay := o.RetryDelay
+	if delay == 0 {
+		delay = time.Second
+	}
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		var data []byte
+		var retry bool
+		data, retry, err = o.getOnce(ctx, path, accept)
+		if err == nil {
+			return data, nil
+		}
+		if !retry || attempt == attempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("snapshot: %s: %w", path, ctx.Err())
+		case <-time.After(delay * time.Duration(attempt)):
+		}
+	}
+	return nil, err
+}
+
+// getOnce is one try, and whether trying again could help.
+func (o Options) getOnce(ctx context.Context, path, accept string) (data []byte, retry bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.API+path, nil)
 	if err != nil {
-		return nil, fmt.Errorf("snapshot: %w", err)
+		return nil, false, fmt.Errorf("snapshot: %w", err)
 	}
 	req.Header.Set("Accept", accept)
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -229,17 +264,18 @@ func (o Options) get(ctx context.Context, path, accept string) ([]byte, error) {
 	}
 	resp, err := o.Client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("snapshot: %s: %w", path, err)
+		return nil, true, fmt.Errorf("snapshot: %s: %w", path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
-	if err != nil {
-		return nil, fmt.Errorf("snapshot: %s: %w", path, err)
-	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("snapshot: %s: GitHub answered %s", path, resp.Status)
+		again := resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests
+		return nil, again, fmt.Errorf("snapshot: %s: GitHub answered %s", path, resp.Status)
 	}
-	return data, nil
+	data, err = io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, true, fmt.Errorf("snapshot: %s: %w", path, err)
+	}
+	return data, false, nil
 }
 
 func truncate(s string, n int) string {

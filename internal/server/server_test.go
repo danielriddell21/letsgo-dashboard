@@ -226,3 +226,20 @@ func TestPagesCarrySecurityHeaders(t *testing.T) {
 		t.Errorf("CSP = %q", csp)
 	}
 }
+
+func TestProxyLetsTheBrowserKeepAReleaseFileOnlyForTheSameToken(t *testing.T) {
+	u := newUpstream(t)
+	srv := u.server(Config{})
+	defer srv.Close()
+
+	file := get(t, srv, "/api/gh/repos/o/r/releases/assets/7", "viewer")
+	if cc := file.Header.Get("Cache-Control"); !strings.Contains(cc, "private") || strings.Contains(cc, "no-store") {
+		t.Errorf("a release file's Cache-Control = %q", cc)
+	}
+	if file.Header.Get("Vary") != "Authorization" {
+		t.Errorf("Vary = %q; a cached private file must not be served to a request with another token", file.Header.Get("Vary"))
+	}
+	if cc := get(t, srv, "/api/gh/repos/o/r/releases", "viewer").Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("a release list's Cache-Control = %q, want no-store", cc)
+	}
+}

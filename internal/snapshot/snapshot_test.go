@@ -3,13 +3,16 @@ package snapshot
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 func fakeGitHub(t *testing.T, private bool) *httptest.Server {
@@ -83,4 +86,50 @@ func TestWriteRefusesAPrivateRepository(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "private") {
 		t.Errorf("err = %v, want a refusal naming the repository as private", err)
 	}
+}
+
+func TestWriteRetriesAFlakyRead(t *testing.T) {
+	var asset1 atomic.Int32
+	inner := fakeGitHub(t, false)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/o/r/releases/assets/1" && asset1.Add(1) <= 2 {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		proxyTo(inner.URL, w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	out := t.TempDir()
+	err := Write(context.Background(), Options{API: srv.URL, Projects: []string{"o/r"}, Out: out, Web: fstest.MapFS{}, RetryDelay: time.Millisecond})
+	if err != nil {
+		t.Fatalf("a read that fails twice then succeeds failed the build: %v", err)
+	}
+	if asset1.Load() != 3 {
+		t.Errorf("the flaky asset was requested %d times, want 3", asset1.Load())
+	}
+}
+
+func TestWriteDoesNotRetryAnAnswerThatWillNotChange(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.NotFound(w, nil)
+	}))
+	t.Cleanup(srv.Close)
+	err := Write(context.Background(), Options{API: srv.URL, Projects: []string{"o/r"}, Out: t.TempDir(), Web: fstest.MapFS{}, RetryDelay: time.Millisecond})
+	if err == nil || calls.Load() != 1 {
+		t.Errorf("err = %v after %d calls; a 404 should fail at once", err, calls.Load())
+	}
+}
+
+func proxyTo(base string, w http.ResponseWriter, r *http.Request) {
+	resp, err := http.Get(base + r.URL.RequestURI()) //nolint:noctx,gosec // a test double
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
 }

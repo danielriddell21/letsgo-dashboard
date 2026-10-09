@@ -3,29 +3,46 @@
 
 // ---------- versions
 
+const SEMVER = /^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
 // parseTag reads a tag in a project's scope ("cli/" + "v1.2.3-rc.1"). It
 // returns null for a tag outside the scope or that isn't semver.
 export function parseTag(tag, prefix = '') {
   if (!tag.startsWith(prefix)) return null;
-  const m = tag.slice(prefix.length).match(/^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/);
+  const m = SEMVER.exec(tag.slice(prefix.length));
   if (!m) return null;
   return { major: +m[1], minor: +m[2], patch: +m[3], pre: m[4] ? m[4].split('.') : [] };
 }
 
-// compareVersions orders parsed versions by semver precedence.
-export function compareVersions(a, b) {
-  for (const k of ['major', 'minor', 'patch']) if (a[k] !== b[k]) return a[k] - b[k];
-  if (!a.pre.length || !b.pre.length) return b.pre.length - a.pre.length;
-  for (let i = 0; i < Math.max(a.pre.length, b.pre.length); i++) {
-    const x = a.pre[i], y = b.pre[i];
-    if (x === undefined) return -1;
-    if (y === undefined) return 1;
-    const nx = /^\d+$/.test(x), ny = /^\d+$/.test(y);
-    if (nx && ny && +x !== +y) return +x - +y;
-    if (nx !== ny) return nx ? -1 : 1;
-    if (x !== y) return x < y ? -1 : 1;
+const numeric = s => /^\d+$/.test(s);
+
+// compareIdentifier orders two pre-release identifiers: numbers by value and
+// before words, words by ASCII.
+function compareIdentifier(x, y) {
+  const nx = numeric(x), ny = numeric(y);
+  if (nx && ny) return Number(x) - Number(y);
+  if (nx !== ny) return nx ? -1 : 1;
+  if (x === y) return 0;
+  return x < y ? -1 : 1;
+}
+
+function comparePre(a, b) {
+  if (!a.length || !b.length) return b.length - a.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if (a[i] === undefined) return -1;
+    if (b[i] === undefined) return 1;
+    const c = compareIdentifier(a[i], b[i]);
+    if (c) return c;
   }
   return 0;
+}
+
+// compareVersions orders parsed versions by semver precedence.
+export function compareVersions(a, b) {
+  for (const k of ['major', 'minor', 'patch']) {
+    if (a[k] !== b[k]) return a[k] - b[k];
+  }
+  return comparePre(a.pre, b.pre);
 }
 
 // ---------- fingerprints, exactly as letsgo verify draws them
@@ -45,14 +62,16 @@ export function randomartTitle(tag) {
   return title.length + 2 <= WIDTH ? title : tag;
 }
 
+const clamp = (v, max) => Math.min(Math.max(v, 0), max);
+
 // randomart is OpenSSH's drunken bishop over a digest (Uint8Array).
 export function randomart(digest, title) {
   const field = Array.from({ length: WIDTH }, () => new Array(HEIGHT).fill(0));
   let x = Math.floor(WIDTH / 2), y = Math.floor(HEIGHT / 2);
   for (let b of digest) {
     for (let i = 0; i < 4; i++) {
-      x = Math.min(Math.max(x + (b & 1 ? 1 : -1), 0), WIDTH - 1);
-      y = Math.min(Math.max(y + (b & 2 ? 1 : -1), 0), HEIGHT - 1);
+      x = clamp(x + (b & 1 ? 1 : -1), WIDTH - 1);
+      y = clamp(y + (b & 2 ? 1 : -1), HEIGHT - 1);
       field[x][y] = Math.min(field[x][y] + 1, GLYPHS.length - 3);
       b >>= 2;
     }
@@ -145,32 +164,49 @@ export function pgpWords(digest) {
 }
 
 export const hex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+export const fromHex = h => Uint8Array.from(h.match(/../g), b => Number.parseInt(b, 16));
 
 // ---------- release text
+
+const RETRACTED = '**This release is retracted.**';
 
 // readNotice reads back the retraction notice letsgo yank prepends to a
 // release's body, or returns null when there is none.
 export function readNotice(body) {
-  if (!body || !body.startsWith('> [!CAUTION]')) return null;
+  if (!body?.startsWith('> [!CAUTION]')) return null;
   const n = { reason: '', use: '' };
   for (const raw of body.split('\n')) {
     const line = raw.replace(/^>\s?/, '').trim();
-    const r = line.match(/^\*\*This release is retracted\.\*\*\s*(.*)$/);
-    if (r) n.reason = r[1].trim();
-    const u = line.match(/^Use (\S+) or later\.$/);
-    if (u) { n.use = u[1]; break; }
+    if (line.startsWith(RETRACTED)) n.reason = line.slice(RETRACTED.length).trim();
+    if (line.startsWith('Use ') && line.endsWith(' or later.')) {
+      n.use = line.slice('Use '.length, -' or later.'.length).trim();
+      break;
+    }
   }
   return n;
 }
 
 // ---------- projects
 
+const NAME = /^[\w.-]{1,100}$/;
+const PREFIX = /^[\w./-]{1,100}$/;
+
 // parseSpec reads "owner/name" or "owner/name@prefix/".
 export function parseSpec(s) {
-  const m = String(s).trim().match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:@([A-Za-z0-9_.\/-]+?)\/?)?$/);
-  if (!m) return null;
-  const prefix = m[3] ? m[3] + '/' : '';
-  return { owner: m[1], repo: m[2], prefix, id: `${m[1]}/${m[2]}${prefix ? '@' + prefix : ''}` };
+  const parts = String(s).trim().split('@');
+  if (parts.length > 2) return null;
+  const [repoPart, prefixPart] = parts;
+  const names = repoPart.split('/');
+  if (names.length !== 2 || !NAME.test(names[0]) || !NAME.test(names[1])) return null;
+  let prefix = '';
+  if (prefixPart !== undefined) {
+    let p = prefixPart;
+    while (p.endsWith('/')) p = p.slice(0, -1);
+    if (!p || !PREFIX.test(p)) return null;
+    prefix = p + '/';
+  }
+  const id = prefix ? `${names[0]}/${names[1]}@${prefix}` : `${names[0]}/${names[1]}`;
+  return { owner: names[0], repo: names[1], prefix, id };
 }
 
 // latestStable is the newest stable release that isn't retracted.
@@ -180,44 +216,46 @@ export function latestStable(releases) {
 
 // lastAudit is a release's most recent audit entry, or null.
 export function lastAudit(r) {
-  const a = r.audit && r.audit.audits;
-  return a && a.length ? a[a.length - 1] : null;
+  const a = r.audit?.audits;
+  return a?.length ? a[a.length - 1] : null;
 }
 
 // status is one word about a release, worst first.
 export function status(r) {
   if (r.retracted) return { kind: 'danger', label: 'Retracted' };
   const a = lastAudit(r);
-  if (a && a.status === 'affected') return { kind: 'danger', label: 'Vulnerable', ids: (a.findings || []).map(f => f.id) };
+  if (a?.status === 'affected') return { kind: 'danger', label: 'Vulnerable', ids: (a.findings || []).map(f => f.id) };
   if (a) return { kind: 'success', label: 'No known issues', at: String(a.at).slice(0, 10) };
   if (r.prerelease) return { kind: 'secondary', label: 'Pre-release' };
-  if (r.hasAudit === false || r.audit === null) return { kind: 'secondary', label: 'Not audited' };
   return { kind: 'secondary', label: 'Not audited' };
 }
 
 // moduleVersion is the version a manifest records for a dependency.
 export function moduleVersion(manifest, path) {
-  const m = manifest && manifest.modules && (manifest.modules.list || []).find(x => x.path === path);
+  const m = manifest?.modules?.list?.find(x => x.path === path);
   return m ? m.version : '';
 }
 
-const goVersion = v => parseTag(v) || parseTag('v' + String(v).replace(/^v/, ''));
+const goVersion = v => parseTag('v' + String(v).replace(/^v/, ''));
 
-// fixedIn is the first newer stable, unretracted release that no longer has
-// a finding: by the dependency's fixed version when the audit gave one and
-// the manifest is loaded, otherwise by that release's own latest audit.
-export function fixedIn(releases, r, finding) {
-  const newer = releases.filter(x => !x.prerelease && !x.retracted && compareVersions(x.version, r.version) > 0)
-    .sort((a, b) => compareVersions(a.version, b.version));
-  for (const x of newer) {
-    if (finding.fixed && x.manifest) {
-      const have = goVersion(moduleVersion(x.manifest, finding.module)), want = goVersion(finding.fixed);
-      if (have && want && compareVersions(have, want) >= 0) return x;
-    }
-    const a = lastAudit(x);
-    if (a && !(a.findings || []).some(f => f.id === finding.id)) return x;
+// fixes reports whether release x no longer has a finding: by the
+// dependency's fixed version when the audit gave one and the manifest is
+// loaded, otherwise by x's own latest audit.
+function fixes(x, finding) {
+  if (finding.fixed && x.manifest) {
+    const have = goVersion(moduleVersion(x.manifest, finding.module)), want = goVersion(finding.fixed);
+    if (have && want && compareVersions(have, want) >= 0) return true;
   }
-  return null;
+  const a = lastAudit(x);
+  return Boolean(a) && !(a.findings || []).some(f => f.id === finding.id);
+}
+
+// fixedIn is the first newer stable, unretracted release without a finding.
+export function fixedIn(releases, r, finding) {
+  return releases
+    .filter(x => !x.prerelease && !x.retracted && compareVersions(x.version, r.version) > 0)
+    .sort((a, b) => compareVersions(a.version, b.version))
+    .find(x => fixes(x, finding)) || null;
 }
 
 // verdict is what to tell someone who runs `have` (a release or null).
@@ -226,9 +264,11 @@ export function verdict(releases, have) {
   if (!have) return { kind: 'none', target: latest };
   if (have.retracted) return { kind: 'danger', title: `${have.tag} was retracted`, text: have.retracted.reason || 'The maintainer withdrew it.', target: latest };
   const a = lastAudit(have);
-  if (a && a.status === 'affected' && (a.findings || []).length) {
+  if (a?.status === 'affected' && a.findings?.length) {
     const fx = fixedIn(releases, have, a.findings[0]);
-    return { kind: 'danger', title: `${have.tag} has a known vulnerability`, text: `${a.findings.map(f => f.id).join(', ')}. ${fx ? `Fixed in ${fx.tag}.` : 'No fixed release yet.'}`, target: fx || latest };
+    const ids = a.findings.map(f => f.id).join(', ');
+    const fix = fx ? `Fixed in ${fx.tag}.` : 'No fixed release yet.';
+    return { kind: 'danger', title: `${have.tag} has a known vulnerability`, text: `${ids}. ${fix}`, target: fx || latest };
   }
   if (latest && compareVersions(latest.version, have.version) > 0) return { kind: 'attention', title: `Update available: ${latest.tag}`, text: '', target: latest };
   return { kind: 'success', title: 'Up to date', text: '', target: latest };
@@ -237,18 +277,23 @@ export function verdict(releases, have) {
 // gate is what a release's manifest says about a gate, following
 // promoted_from to the release candidate when the stable didn't record it.
 export function gate(r, name, byTag) {
-  const g = r.manifest && r.manifest.gates || {};
-  if (g[name]) return g[name];
-  const pf = r.manifest && r.manifest.promoted_from;
-  const rc = pf && byTag[pf.tag];
-  return rc && rc.manifest && rc.manifest.gates && rc.manifest.gates[name] || '';
+  const own = r.manifest?.gates?.[name];
+  if (own) return own;
+  const rc = byTag[r.manifest?.promoted_from?.tag];
+  return rc?.manifest?.gates?.[name] || '';
+}
+
+function executables(a) {
+  if (a.binaries?.length) return a.binaries;
+  if (a.binary) return [{ name: a.binary, size: a.binary_size, sha256: a.binary_sha256 }];
+  return [];
 }
 
 // artifacts lists a manifest's archives with their executables.
 export function artifacts(manifest) {
   return (manifest.artifacts || []).filter(a => a.os).map(a => ({
     name: a.name, os: a.os, arch: a.arch, platform: `${a.os}/${a.arch}`, size: a.size, sha256: a.sha256, variant: a.variant || '',
-    binaries: a.binaries && a.binaries.length ? a.binaries : a.binary ? [{ name: a.binary, size: a.binary_size, sha256: a.binary_sha256 }] : [],
+    binaries: executables(a),
   }));
 }
 
@@ -256,31 +301,43 @@ export function artifacts(manifest) {
 export function digests(manifest) {
   const out = [];
   for (const a of artifacts(manifest)) {
-    out.push({ sha256: a.sha256, what: `${a.platform}${a.variant ? ' (' + a.variant + ')' : ''} archive`, file: a.name });
-    for (const b of a.binaries) if (b.sha256) out.push({ sha256: b.sha256, what: `${a.platform} executable`, file: b.name });
+    const where = a.variant ? `${a.platform} (${a.variant})` : a.platform;
+    out.push({ sha256: a.sha256, what: `${where} archive`, file: a.name });
+    for (const b of a.binaries) {
+      if (b.sha256) out.push({ sha256: b.sha256, what: `${a.platform} executable`, file: b.name });
+    }
   }
   if (manifest.source) out.push({ sha256: manifest.source.sha256, what: 'source archive', file: manifest.source.archive });
   for (const i of manifest.images || []) out.push({ sha256: String(i.digest).replace(/^sha256:/, ''), what: 'container image', file: i.reference });
   return out;
 }
 
+const dependencyMap = m => Object.fromEntries((m.modules?.list || []).map(x => [x.path, x.version]));
+
 // changes summarises what moving from one release to another brings, from
 // the manifests of every stable release between them.
 export function changes(releases, from, to, platform) {
   const span = releases.filter(r => !r.prerelease && compareVersions(r.version, from.version) > 0 && compareVersions(r.version, to.version) <= 0);
   const out = { span, api: [], deps: [], go: null, size: null, retracted: span.filter(r => r.retracted), missing: span.filter(r => !r.manifest) };
-  for (const r of span) for (const c of (r.manifest && r.manifest.api_changes) || []) out.api.push({ ...c, tag: r.tag });
-  const fm = Object.fromEntries(((from.manifest.modules || {}).list || []).map(m => [m.path, m.version]));
-  const tm = Object.fromEntries(((to.manifest.modules || {}).list || []).map(m => [m.path, m.version]));
-  for (const k of new Set([...Object.keys(fm), ...Object.keys(tm)])) if (fm[k] !== tm[k]) out.deps.push({ path: k, from: fm[k] || '', to: tm[k] || '' });
+  for (const r of span) {
+    for (const c of r.manifest?.api_changes || []) out.api.push({ ...c, tag: r.tag });
+  }
+  const fm = dependencyMap(from.manifest), tm = dependencyMap(to.manifest);
+  for (const k of new Set([...Object.keys(fm), ...Object.keys(tm)])) {
+    if (fm[k] !== tm[k]) out.deps.push({ path: k, from: fm[k] || '', to: tm[k] || '' });
+  }
   if (from.manifest.builder.go !== to.manifest.builder.go) out.go = { from: from.manifest.builder.go, to: to.manifest.builder.go };
-  const fa = artifacts(from.manifest).find(a => a.platform === platform && !a.variant), ta = artifacts(to.manifest).find(a => a.platform === platform && !a.variant);
+  const pick = m => artifacts(m).find(a => a.platform === platform && !a.variant);
+  const fa = pick(from.manifest), ta = pick(to.manifest);
   if (fa && ta) out.size = { from: fa.size, to: ta.size };
   return out;
 }
 
-export const formatSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+export function formatSize(n) {
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+  if (n >= 1024) return Math.round(n / 1024) + ' KB';
+  return n + ' B';
+}
+// plural: "1 release", "2 releases".
+export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 export const shortDate = s => String(s || '').slice(0, 10);
-
-const ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ENTITIES[c]);

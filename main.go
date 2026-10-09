@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -107,8 +108,8 @@ func fsSub() (fs.FS, error) {
 	return static, nil
 }
 
-// healthcheck asks a running server whether it is up. The image has no shell
-// or curl, so the binary checks itself.
+// healthcheck asks whether a server is accepting connections on addr. The
+// image has no shell or curl, so the binary checks itself.
 func healthcheck(addr string) int {
 	host := addr
 	if strings.HasPrefix(host, ":") {
@@ -116,20 +117,13 @@ func healthcheck(addr string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+host+"/healthz", nil)
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", host)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 1
-	}
+	_ = conn.Close()
 	return 0
 }
 

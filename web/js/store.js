@@ -1,18 +1,30 @@
-// Everything the dashboard remembers lives here, in this browser's
-// localStorage. Nothing is stored on the server.
+// What the dashboard remembers lives here, in this browser's localStorage:
+// the viewer's settings and, if they sign in, their token. Nothing is stored
+// on the server, and nothing GitHub returns is written here.
 
 const P = 'lgd:';
 
-function read(key, fallback) {
+function read(key) {
   try {
-    const v = localStorage.getItem(P + key);
-    return v === null ? fallback : JSON.parse(v);
-  } catch { return fallback; }
+    return localStorage.getItem(P + key);
+  } catch {
+    return null;
+  }
 }
 function write(key, value) {
-  try { localStorage.setItem(P + key, JSON.stringify(value)); return true; } catch { return false; }
+  try {
+    localStorage.setItem(P + key, value);
+  } catch {
+    // Storage is unavailable or full; the page still works for this visit.
+  }
 }
-function remove(key) { try { localStorage.removeItem(P + key); } catch { /* storage unavailable */ } }
+function remove(key) {
+  try {
+    localStorage.removeItem(P + key);
+  } catch {
+    // Storage is unavailable.
+  }
+}
 
 // Modules are the pieces the overview and project pages are made of. Each
 // can be shown, hidden and reordered in Settings.
@@ -35,80 +47,88 @@ export const PROJECT_SECTIONS = [
   { id: 'fingerprint', title: 'Fingerprint', side: true },
 ];
 
-const DEFAULTS = {
-  projects: null, // null until the viewer chooses; then the server's defaults stop applying
-  have: {},
-  theme: 'auto',
-  platform: '',
-  overview: OVERVIEW_MODULES.map(m => ({ id: m.id, on: m.id !== 'recent' })),
-  sections: PROJECT_SECTIONS.map(m => ({ id: m.id, on: true })),
-  prereleases: false,
-};
+const THEMES = ['auto', 'light', 'dark', 'dark_dimmed'];
+const SPEC = /^[\w.-]{1,100}\/[\w.-]{1,100}(?:@[\w./-]{1,100})?$/;
+const TAG = /^[\w./+-]{1,200}$/;
+const PLATFORM = /^[a-z0-9]{1,20}\/[a-z0-9]{1,20}$/;
 
-// layout merges a saved list of modules with the known ones, so a module
-// added in a later version shows up and a removed one disappears.
+// layout keeps the known modules, in the saved order, with a module added in
+// a later version shown and a removed one dropped.
 function layout(saved, known) {
   const ids = new Set(known.map(k => k.id));
-  const out = (Array.isArray(saved) ? saved : []).filter(m => m && ids.has(m.id)).map(m => ({ id: m.id, on: !!m.on }));
-  for (const k of known) if (!out.some(m => m.id === k.id)) out.push({ id: k.id, on: true });
+  const out = (Array.isArray(saved) ? saved : []).filter(m => ids.has(m?.id)).map(m => ({ id: m.id, on: Boolean(m.on) }));
+  for (const k of known) {
+    if (!out.some(m => m.id === k.id)) out.push({ id: k.id, on: true });
+  }
   return out;
 }
 
+// clean turns anything that claims to be settings into settings: every
+// field checked against what it may hold, everything else dropped.
+function clean(s) {
+  const src = s && typeof s === 'object' ? s : {};
+  const have = {};
+  for (const [k, v] of Object.entries(src.have && typeof src.have === 'object' ? src.have : {})) {
+    if (SPEC.test(k) && typeof v === 'string' && TAG.test(v)) have[k] = v;
+  }
+  const projects = Array.isArray(src.projects) ? src.projects.filter(p => typeof p === 'string' && SPEC.test(p)) : null;
+  return {
+    projects,
+    have,
+    theme: THEMES.includes(src.theme) ? src.theme : 'auto',
+    platform: typeof src.platform === 'string' && PLATFORM.test(src.platform) ? src.platform : '',
+    overview: layout(src.overview, OVERVIEW_MODULES).map(m => ({ ...m, on: src.overview ? m.on : m.id !== 'recent' })),
+    sections: layout(src.sections, PROJECT_SECTIONS),
+    prereleases: src.prereleases === true,
+  };
+}
+
+function parse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 export const settings = {
-  get() {
-    const s = { ...DEFAULTS, ...read('settings', {}) };
-    s.overview = layout(s.overview, OVERVIEW_MODULES);
-    s.sections = layout(s.sections, PROJECT_SECTIONS);
-    return s;
-  },
-  set(patch) { write('settings', { ...this.get(), ...patch }); },
+  get() { return clean(parse(read('settings'))); },
+  set(patch) { write('settings', JSON.stringify(clean({ ...this.get(), ...patch }))); },
   // export is the viewer's layout and watch list, without the token, so it
   // can be shared or moved to another browser.
   export() { return JSON.stringify(this.get(), null, 2); },
   import(text) {
-    const s = JSON.parse(text);
-    if (typeof s !== 'object' || s === null) throw new Error('Settings must be a JSON object.');
-    const keep = {};
-    for (const k of Object.keys(DEFAULTS)) if (k in s) keep[k] = s[k];
-    write('settings', { ...DEFAULTS, ...keep });
+    const s = parse(text);
+    if (!s || typeof s !== 'object') throw new Error('Settings must be a JSON object.');
+    write('settings', JSON.stringify(clean(s)));
   },
 };
 
+// A GitHub token is letters, digits and underscores (ghp_…, gho_…,
+// github_pat_…). Anything else isn't one, and isn't stored.
+const TOKEN = /^\w{20,255}$/;
+
 export const token = {
-  get() { return read('token', ''); },
-  set(t) { write('token', t); },
+  get() {
+    const t = read('token') || '';
+    return TOKEN.test(t) ? t : '';
+  },
+  set(t) {
+    if (!TOKEN.test(t)) throw new Error("That doesn't look like a GitHub token.");
+    write('token', t);
+  },
   clear() { remove('token'); },
 };
 
-// The cache holds what GitHub returned, so a page reload doesn't spend the
-// rate limit again. Release files are cached for good (an asset ID never
-// changes content); lists expire. When storage fills, the oldest entries go.
-export const cache = {
-  get(key, maxAgeMs) {
-    const e = read('c:' + key, null);
-    if (!e) return undefined;
-    if (maxAgeMs && Date.now() - e.t > maxAgeMs) return undefined;
-    return e.v;
-  },
-  put(key, value) {
-    const entry = { t: Date.now(), v: value };
-    for (let i = 0; i < 8; i++) {
-      if (write('c:' + key, entry)) return;
-      if (!evictOldest(10)) return;
-    }
-  },
-  clear() { for (const k of keys()) if (k.startsWith(P + 'c:')) localStorage.removeItem(k); },
-  size() { let n = 0; for (const k of keys()) if (k.startsWith(P + 'c:')) n += (localStorage.getItem(k) || '').length; return n; },
-};
-
-function keys() { try { return Object.keys(localStorage); } catch { return []; } }
-function evictOldest(n) {
-  const entries = keys().filter(k => k.startsWith(P + 'c:')).map(k => {
-    try { return [k, JSON.parse(localStorage.getItem(k)).t || 0]; } catch { return [k, 0]; }
-  }).sort((a, b) => a[1] - b[1]).slice(0, n);
-  for (const [k] of entries) localStorage.removeItem(k);
-  return entries.length > 0;
-}
-
 // forgetEverything removes all the dashboard has stored in this browser.
-export function forgetEverything() { for (const k of keys()) if (k.startsWith(P)) localStorage.removeItem(k); }
+export function forgetEverything() {
+  let keys = [];
+  try {
+    keys = Object.keys(localStorage);
+  } catch {
+    return;
+  }
+  for (const k of keys) {
+    if (k.startsWith(P)) remove(k.slice(P.length));
+  }
+}
