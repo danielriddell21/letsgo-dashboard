@@ -121,7 +121,7 @@ function watchedSection() {
 function shareSection() {
   return section('Share your setup',
     h('p', { class: 'small muted' }, 'Your watched projects and layout, without your token. Paste it into another browser to set it up the same way.'),
-    h('textarea', { class: 'form-control mono', id: 'settings-json', rows: '6', 'aria-label': 'Settings' }, settings.export()),
+    h('textarea', { class: 'form-control mono', id: 'settings-json', rows: '6', 'aria-label': 'Settings', 'data-input': 'draft' }, ui.draft ?? settings.export()),
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-sm', 'data-copy-from': 'settings-json' }, 'Copy'),
       h('button', { class: 'btn btn-sm', 'data-action': 'import' }, "Import what's in the box")),

@@ -47,7 +47,7 @@ export const PROJECT_SECTIONS = [
   { id: 'fingerprint', title: 'Fingerprint', side: true },
 ];
 
-const THEMES = ['auto', 'light', 'dark', 'dark_dimmed'];
+const THEMES = new Set(['auto', 'light', 'dark', 'dark_dimmed']);
 const SPEC = /^[\w.-]{1,100}\/[\w.-]{1,100}(?:@[\w./-]{1,100})?$/;
 const TAG = /^[\w./+-]{1,200}$/;
 const PLATFORM = /^[a-z0-9]{1,20}\/[a-z0-9]{1,20}$/;
@@ -75,7 +75,7 @@ function clean(s) {
   return {
     projects,
     have,
-    theme: THEMES.includes(src.theme) ? src.theme : 'auto',
+    theme: THEMES.has(src.theme) ? src.theme : 'auto',
     platform: typeof src.platform === 'string' && PLATFORM.test(src.platform) ? src.platform : '',
     overview: layout(src.overview, OVERVIEW_MODULES).map(m => ({ ...m, on: src.overview ? m.on : m.id !== 'recent' })),
     sections: layout(src.sections, PROJECT_SECTIONS),

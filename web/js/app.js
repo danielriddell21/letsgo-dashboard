@@ -243,6 +243,7 @@ function importSettings() {
   try {
     settings.import($('#settings-json').value);
     ui.notice = '';
+    ui.draft = null;
     forgetProjects();
   } catch (e) {
     ui.notice = `That isn't valid settings JSON: ${e.message}`;
@@ -370,9 +371,16 @@ document.addEventListener('change', ev => {
   schedule();
 });
 
+// What is typed into a field that a re-render would otherwise reset.
+const INPUTS = {
+  dep: value => { ui.dep = value; },
+  draft: value => { ui.draft = value; },
+};
+
 document.addEventListener('input', ev => {
-  if (ev.target.dataset.input !== 'dep') return;
-  ui.dep = ev.target.value;
+  const handler = INPUTS[ev.target.dataset.input];
+  if (!handler) return;
+  handler(ev.target.value);
   schedule();
 });
 
@@ -399,6 +407,7 @@ document.addEventListener('drop', ev => {
 
 window.addEventListener('hashchange', () => {
   ui.notice = '';
+  ui.draft = null;
   schedule();
   window.scrollTo(0, 0);
 });

@@ -67,4 +67,20 @@ test('a spec rejects anything but owner/repo with an optional prefix', () => {
   assert.equal(core.parseSpec('o/r@'), null);
   assert.equal(core.parseSpec('o/r@a@b'), null);
   assert.equal(core.parseSpec('<o>/r'), null);
+  assert.equal(core.parseSpec('../r'), null);
+  assert.equal(core.parseSpec('o/..'), null);
+});
+
+test('a path segment is a name GitHub could have, encoded, and never a dot segment', () => {
+  assert.equal(core.pathSegment('danielriddell21'), 'danielriddell21');
+  assert.equal(core.pathSegment('letsgo.go-1_x'), 'letsgo.go-1_x');
+  for (const bad of ['..', '.', '', 'a/b', 'a b', '../x', 'a?b', 'a#b', 'x'.repeat(101), '%2e%2e']) {
+    assert.throws(() => core.pathSegment(bad), bad);
+  }
+});
+
+test('an asset ID is a positive integer', () => {
+  assert.equal(core.assetID('604008983'), '604008983');
+  assert.equal(core.assetID(7), '7');
+  for (const bad of ['0', '-1', '1.5', 'x', '1/../2', '', '9007199254740993']) assert.throws(() => core.assetID(bad), bad);
 });

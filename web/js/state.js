@@ -8,7 +8,7 @@ export const session = {
 
 export const ui = {
   sel: {}, tab: 'download', fp: 'art', allVersions: false, dep: 'golang.org/x/', check: null,
-  addOwner: '', ownerRepos: null, ownerError: '', notice: '',
+  addOwner: '', ownerRepos: null, ownerError: '', notice: '', draft: null,
 };
 
 export const isStatic = () => session.config.mode === 'static';

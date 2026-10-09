@@ -191,13 +191,30 @@ export function readNotice(body) {
 const NAME = /^[\w.-]{1,100}$/;
 const PREFIX = /^[\w./-]{1,100}$/;
 
+// pathSegment makes one URL path segment out of an owner or repository name
+// from the viewer: only the characters GitHub allows in one, and never "."
+// or "..", which would climb out of the path. It throws for anything else.
+export function pathSegment(name) {
+  if (!validName(name)) throw new Error(`"${name}" isn't a valid owner or repository name.`);
+  return encodeURIComponent(name);
+}
+
+const validName = name => NAME.test(name) && name !== '.' && name !== '..';
+
+// assetID is a release file's numeric ID as it goes in a URL.
+export function assetID(id) {
+  const n = Number(id);
+  if (!Number.isSafeInteger(n) || n < 1) throw new Error(`"${id}" isn't a release file ID.`);
+  return String(n);
+}
+
 // parseSpec reads "owner/name" or "owner/name@prefix/".
 export function parseSpec(s) {
   const parts = String(s).trim().split('@');
   if (parts.length > 2) return null;
   const [repoPart, prefixPart] = parts;
   const names = repoPart.split('/');
-  if (names.length !== 2 || !NAME.test(names[0]) || !NAME.test(names[1])) return null;
+  if (names.length !== 2 || !validName(names[0]) || !validName(names[1])) return null;
   let prefix = '';
   if (prefixPart !== undefined) {
     let p = prefixPart;

@@ -11,7 +11,7 @@
 // change for a given ID, as cacheable.
 
 import { token } from './store.js';
-import { hex } from './core.js';
+import { hex, pathSegment, assetID } from './core.js';
 
 export class ApiError extends Error {
   constructor(status, message, rateLimited) {
@@ -84,11 +84,22 @@ function trimRelease(x) {
   };
 }
 
+// repoPath is "owner/name" for a URL, or throws ApiError for names GitHub
+// could not have.
+function repoPath(o, r) {
+  try {
+    return `${pathSegment(o)}/${pathSegment(r)}`;
+  } catch (e) {
+    throw new ApiError(400, e.message);
+  }
+}
+
 async function listReleases(o, r) {
-  if (staticSite) return file(`data/${o}/${r}/releases.json`);
+  const repo = repoPath(o, r);
+  if (staticSite) return file(`data/${repo}/releases.json`);
   const all = [];
   for (let page = 1; page <= 3; page++) {
-    const batch = await request(`/repos/${o}/${r}/releases?per_page=100&page=${page}`);
+    const batch = await request(`/repos/${repo}/releases?per_page=100&page=${page}`);
     all.push(...batch.map(trimRelease));
     if (batch.length < 100) break;
   }
@@ -96,24 +107,32 @@ async function listReleases(o, r) {
 }
 
 async function readRepo(o, r) {
-  if (staticSite) return file(`data/${o}/${r}/repo.json`);
-  const x = await request(`/repos/${o}/${r}`);
+  const repo = repoPath(o, r);
+  if (staticSite) return file(`data/${repo}/repo.json`);
+  const x = await request(`/repos/${repo}`);
   return { private: x.private, description: x.description || '', avatar: x.owner?.avatar_url, url: x.html_url };
 }
 
 async function readAsset(o, r, id) {
-  const bytes = staticSite ? await file(`data/${o}/${r}/assets/${id}`, true) : await request(`/repos/${o}/${r}/releases/assets/${id}`, true);
+  const repo = repoPath(o, r), asset = assetID(id);
+  const bytes = staticSite ? await file(`data/${repo}/assets/${asset}`, true) : await request(`/repos/${repo}/releases/assets/${asset}`, true);
   const sum = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   return { text: new TextDecoder().decode(bytes), sha256: hex(sum) };
 }
 
 async function ownerRepos(o) {
   if (staticSite) return unavailable();
+  let owner;
   try {
-    return await request(`/orgs/${o}/repos?per_page=100&sort=updated`);
+    owner = pathSegment(o);
+  } catch (e) {
+    throw new ApiError(400, e.message);
+  }
+  try {
+    return await request(`/orgs/${owner}/repos?per_page=100&sort=updated`);
   } catch (e) {
     if (e.status !== 404) throw e;
-    return request(`/users/${o}/repos?per_page=100&sort=updated`);
+    return request(`/users/${owner}/repos?per_page=100&sort=updated`);
   }
 }
 

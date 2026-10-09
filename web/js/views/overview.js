@@ -133,8 +133,8 @@ function advisoriesFor(p, full, found) {
 
 function advisoriesEmpty(found, full) {
   if (found.loading) return [spinner(), ' Checking audits…'];
-  if (full) return 'No release on this page has a known vulnerability.';
-  return 'Neither the versions you use nor the latest releases have a known vulnerability.';
+  if (full) return ['No release on this page has a known vulnerability.'];
+  return ['Neither the versions you use nor the latest releases have a known vulnerability.'];
 }
 
 export function advisoriesModule(full) {
@@ -177,8 +177,8 @@ function dependenciesFor(p, q, found) {
 
 function dependenciesEmpty(found, q) {
   if (found.loading) return [spinner(), ' Reading manifests…'];
-  if (q) return 'No version you use, and no latest release, depends on a matching module.';
-  return 'Type part of a module path.';
+  if (q) return ['No version you use, and no latest release, depends on a matching module.'];
+  return ['Type part of a module path.'];
 }
 
 export function dependenciesModule(full) {
