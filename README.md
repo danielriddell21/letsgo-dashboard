@@ -22,14 +22,20 @@ repositories.
 ## Run it
 
 ```sh
-docker run --rm -p 8080:8080 ghcr.io/danielriddell21/letsgo-dashboard
+docker run --rm -p 8080:8080 --read-only ghcr.io/danielriddell21/letsgo-dashboard
 ```
 
-Then open http://localhost:8080. Or without Docker:
+Then open http://localhost:8080. Or download a binary from the
+[releases](https://github.com/danielriddell21/letsgo-dashboard/releases), or:
 
 ```sh
-go run github.com/danielriddell21/letsgo-dashboard@latest
+go install github.com/danielriddell21/letsgo-dashboard@latest
 ```
+
+The dashboard is released with letsgo, so its own releases can be checked
+the way it checks everyone else's: `letsgo verify --repo
+danielriddell21/letsgo-dashboard`. The image is built by letsgo from the
+same reproducible linux binaries, on a distroless base pinned by digest.
 
 ## What is stored, and where
 
@@ -105,6 +111,18 @@ order.
 
 ```sh
 go run .                 # http://localhost:8080
-go test ./...            # server
-node --test 'web/js/*.test.mjs'   # page logic, including fingerprints checked against letsgo's own
+go test ./...            # server, and the page's tests when Node is installed
+node --test web/js/core.test.mjs  # page logic alone, including fingerprints checked against letsgo's own
 ```
+
+## Releasing
+
+CI is letsgo's: the shared `danielriddell21/github-actions` workflow vets,
+lints, builds and tests every push, and on trunk tags a release candidate with
+`letsgo tag --warranted --pre`. The tag starts `release.yml`, which publishes
+the archives and the image with letsgo. Unticking "Set as a pre-release" on
+the candidate runs `promote.yml`, which publishes the stable version and moves
+the image's `latest`, major and major.minor tags.
+
+The tag job pushes with the `TAG_TOKEN` secret, because a tag pushed with the
+workflow token starts no workflow.
