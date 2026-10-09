@@ -4,7 +4,7 @@ import { h, icon } from '../dom.js';
 import { settings, token, OVERVIEW_MODULES, PROJECT_SECTIONS } from '../store.js';
 import { session, ui, isStatic } from '../state.js';
 import { watched } from '../projects.js';
-import { flash, blank, pageHead, spinner, projectHref, pinButton } from '../ui.js';
+import { flash, blank, pageHead, spinner, external, projectHref, pinButton } from '../ui.js';
 import { searchModule } from './search.js';
 import { PLATFORMS, platform } from './project.js';
 

@@ -134,7 +134,7 @@ function filesBody(p, r) {
 }
 
 function limitedNote(r) {
-  if (!r.hasManifest) return 'Not made with letsgo, so there are no audits, provenance or dependencies to show. Versions, downloads and the file check still work.';
+  if (!r.hasManifest) return ['Not made with letsgo, so there are no audits, provenance or dependencies to show. Versions, downloads and the file check still work.'];
   return [
     "This release was made with letsgo, but this site can't read its manifest, so audits, provenance and dependencies aren't shown. ",
     external('https://github.com/danielriddell21/letsgo-dashboard#run-it', 'Run the dashboard server'), ' for the full view.',
