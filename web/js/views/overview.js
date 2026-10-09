@@ -46,9 +46,10 @@ function attentionModule() {
 function nameCell(p) {
   const avatar = p.meta?.avatar ? h('img', { class: 'avatar avatar-sm', src: p.meta.avatar, alt: '' }) : null;
   return h('td', {},
-    h('a', { href: projectHref(p), class: 'row' }, avatar, h('span', {}, projectName(p))),
-    p.meta?.private ? [' ', labelEl('Private')] : null,
-    [' ', supportLabel(p)]);
+    h('div', { class: 'name-cell' },
+      h('a', { href: projectHref(p), class: 'row' }, avatar, h('span', {}, projectName(p))),
+      p.meta?.private ? labelEl('Private') : null,
+      supportLabel(p)));
 }
 
 function messageRow(p, ...message) {
@@ -60,8 +61,8 @@ function projectRow(p) {
     return messageRow(p, stateEl('danger', p.error), ' ', h('button', { class: 'btn btn-sm', 'data-action': 'retry', 'data-project': p.id }, 'Retry'));
   }
   if (p.status !== 'ready') return messageRow(p, spinner());
-  const latest = core.latestStable(p.releases);
-  if (!latest) return messageRow(p, h('span', { class: 'muted' }, 'No stable releases.'));
+  const latest = core.latestStable(p.releases) || p.releases[0];
+  if (!latest) return messageRow(p, h('span', { class: 'muted' }, 'No releases.'));
   const mine = have(p);
   const status = mine ? verdictState(core.verdict(p.releases, mine)) : statusOf(latest);
   return h('tr', {}, nameCell(p),
@@ -76,7 +77,7 @@ function projectsModule() {
     title: 'Pinned projects',
     counter: list.length,
     actions: h('a', { class: 'btn btn-sm', href: '#/add' }, icon('plus'), 'Pin a project'),
-    body: table(['Project', 'You use', 'Latest', 'Status'], list.map(projectRow)),
+    body: table(['Project', 'You use', 'Latest', 'Status'], list.map(projectRow), true),
   });
 }
 

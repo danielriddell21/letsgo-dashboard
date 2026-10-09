@@ -190,3 +190,10 @@ pre.art { margin: 0; font-size: 12px; line-height: 1.2; color: var(--fg-muted); 
 .result-line { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .result-meta { display: inline-flex; gap: 4px; align-items: center; }
 .Label svg { margin-right: 4px; }
+
+/* project lists: one line per project, cells centred */
+.Table.centered td { vertical-align: middle; }
+.name-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.name-cell .row { flex-wrap: nowrap; }
+.Label { gap: 0; }
+.Label svg { margin-right: 4px; flex: none; }

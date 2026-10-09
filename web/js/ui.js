@@ -53,7 +53,7 @@ export function pinButton(id, isPinned) {
 // was, so the supported ones stand out.
 export function supportLabel(p) {
   if (p.status !== 'ready') return null;
-  if (p.supported) return h('span', { class: 'Label Label--success', title: 'Released with letsgo: audits, provenance and dependencies are shown' }, icon('check'), 'letsgo');
+  if (p.supported) return h('span', { class: 'Label Label--success', title: 'Released with letsgo: audits, provenance and dependencies are shown' }, icon('tick', 12), 'letsgo');
   return h('span', { class: 'Label', title: 'Not released with letsgo: releases and downloads only' }, 'Releases only');
 }
 
@@ -70,8 +70,10 @@ export function box({ title, counter, actions, body, footer }) {
     footer ? h('div', { class: 'Box-footer small muted' }, footer) : null);
 }
 
-export const table = (head, rows) => h('div', { class: 'Box-scroll' },
-  h('table', { class: 'Table' }, head ? h('thead', {}, h('tr', {}, head.map(c => h('th', {}, c)))) : null, h('tbody', {}, rows)));
+// table is a Box's table; centred rows suit lists of projects, where cells
+// hold controls, and top-aligned ones suit rows of text.
+export const table = (head, rows, centered) => h('div', { class: 'Box-scroll' },
+  h('table', { class: centered ? 'Table centered' : 'Table' }, head ? h('thead', {}, h('tr', {}, head.map(c => h('th', {}, c)))) : null, h('tbody', {}, rows)));
 
 export const flash = (kind, iconName, body, action) => h('div', { class: `flash ${kind}` }, icon(iconName), h('div', { class: 'flash-grow' }, body), action);
 
