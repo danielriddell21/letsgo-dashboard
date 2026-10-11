@@ -29,3 +29,11 @@ export function schedule() {
     renderer();
   });
 }
+
+// route reads the page from the URL's hash: "#/p/owner/repo" is a project,
+// "#/settings" a page, and an empty hash the overview.
+export function route() {
+  const hash = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
+  if (hash.startsWith('p/')) return { name: 'project', id: hash.slice(2) };
+  return { name: hash || 'overview' };
+}

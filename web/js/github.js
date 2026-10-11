@@ -65,6 +65,8 @@ const LIVE = 'https://api.github.com';
 
 // request reads GitHub: through the server, or straight from the API on a
 // static site, where nobody is signed in.
+const body = (res, raw) => (raw ? res.arrayBuffer().then(b => new Uint8Array(b)) : res.json());
+
 async function request(path, raw) {
   const headers = {};
   const t = staticSite ? '' : token.get();
@@ -77,7 +79,7 @@ async function request(path, raw) {
     throw new ApiError(0, 'GitHub could not be reached.');
   }
   if (!res.ok) throw await errorFrom(res);
-  return raw ? new Uint8Array(await res.arrayBuffer()) : res.json();
+  return body(res, raw);
 }
 
 async function file(path, raw) {
@@ -89,7 +91,7 @@ async function file(path, raw) {
   }
   if (res.status === 404) throw new ApiError(404, "This project isn't on this site.");
   if (!res.ok) throw new ApiError(res.status, `The site answered ${res.status}.`);
-  return raw ? new Uint8Array(await res.arrayBuffer()) : res.json();
+  return body(res, raw);
 }
 
 const unavailable = () => Promise.reject(new ApiError(0, 'Not available on this site.'));
@@ -102,15 +104,17 @@ function trimRelease(x) {
   };
 }
 
-// repoPath is "owner/name" for a URL, or throws ApiError for names GitHub
-// could not have.
-function repoPath(o, r) {
+// segment is a name as a URL path segment, or throws ApiError for a name
+// GitHub could not have.
+function segment(name) {
   try {
-    return `${pathSegment(o)}/${pathSegment(r)}`;
+    return pathSegment(name);
   } catch (e) {
     throw new ApiError(400, e.message);
   }
 }
+
+const repoPath = (o, r) => `${segment(o)}/${segment(r)}`;
 
 // snapshotted says whether a static site carries a repository's data.
 const snapshotted = repo => staticSite && snapshot.has(repo.toLowerCase());
@@ -146,12 +150,7 @@ async function readAsset(o, r, id) {
 
 async function ownerRepos(o) {
   if (staticSite) return unavailable();
-  let owner;
-  try {
-    owner = pathSegment(o);
-  } catch (e) {
-    throw new ApiError(400, e.message);
-  }
+  const owner = segment(o);
   try {
     return await request(`/orgs/${owner}/repos?per_page=100&sort=updated`);
   } catch (e) {

@@ -249,7 +249,7 @@ export function status(r) {
 }
 
 // moduleVersion is the version a manifest records for a dependency.
-export function moduleVersion(manifest, path) {
+function moduleVersion(manifest, path) {
   const m = manifest?.modules?.list?.find(x => x.path === path);
   return m ? m.version : '';
 }

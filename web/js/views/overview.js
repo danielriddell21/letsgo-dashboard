@@ -4,10 +4,10 @@ import * as core from '../core.js';
 import { h, icon } from '../dom.js';
 import { settings } from '../store.js';
 import { ui } from '../state.js';
-import { watched, pinned, project, have, ensure, ensureAudits } from '../projects.js';
+import { watchedProjects, pinned, have, pending, ensure, ensureAudits } from '../projects.js';
 import {
   box, table, flash, blank, pageHead, spinner, stateEl, statusOf, verdictState, vulnLink, releaseLink,
-  projectHref, projectName, labelEl, youUse, haveSelect, supportLabel,
+  projectHref, projectName, labelEl, youUse, haveSelect, supportLabel, retryButton,
 } from '../ui.js';
 import { verifyModule } from './verify.js';
 import { searchModule } from './search.js';
@@ -32,8 +32,7 @@ function prime(p) {
 
 function attentionModule() {
   const items = [];
-  for (const spec of watched()) {
-    const p = project(spec);
+  for (const p of watchedProjects()) {
     if (p.status !== 'ready') continue;
     const v = core.verdict(p.releases, have(p));
     if (v.kind !== 'danger') continue;
@@ -58,7 +57,7 @@ function messageRow(p, ...message) {
 
 function projectRow(p) {
   if (p.status === 'error') {
-    return messageRow(p, stateEl('danger', p.error), ' ', h('button', { class: 'btn btn-sm', 'data-action': 'retry', 'data-project': p.id }, 'Retry'));
+    return messageRow(p, stateEl('danger', p.error), ' ', retryButton(p));
   }
   if (p.status !== 'ready') return messageRow(p, spinner());
   const latest = core.latestStable(p.releases) || p.releases[0];
@@ -82,11 +81,7 @@ function projectsModule() {
 }
 
 function recentModule() {
-  const all = [];
-  for (const spec of watched()) {
-    const p = project(spec);
-    for (const r of p.releases.slice(0, 10)) all.push([p, r]);
-  }
+  const all = watchedProjects().flatMap(p => p.releases.slice(0, 10).map(r => [p, r]));
   all.sort((a, b) => String(b[1].published).localeCompare(String(a[1].published)));
   const rows = all.slice(0, 8).map(([p, r]) => h('div', { class: 'Box-row' },
     h('div', { class: 'Box-row-grow' }, releaseLink(p, r.tag, h('span', { class: 'mono' }, r.tag)), ' ', h('span', { class: 'muted' }, p.id)),
@@ -110,7 +105,7 @@ function advisoryRows(p, r, a) {
 }
 
 function advisoriesFor(p, full, found) {
-  if (p.status === 'loading' || p.status === 'idle') {
+  if (pending(p)) {
     found.loading = true;
     return;
   }
@@ -134,7 +129,7 @@ function advisoriesEmpty(found, full) {
 
 export function advisoriesModule(full) {
   const found = { rows: [], loading: false };
-  for (const spec of watched()) advisoriesFor(project(spec), full, found);
+  for (const p of watchedProjects()) advisoriesFor(p, full, found);
   const body = found.rows.length
     ? table(['Advisory', 'Release', 'Module', 'Fixed in', 'Audited'], found.rows)
     : h('div', { class: 'Box-body muted' }, advisoriesEmpty(found, full));
@@ -159,10 +154,8 @@ function dependencyRows(p, r, q) {
 }
 
 function dependenciesFor(p, q, found) {
-  if (p.status !== 'ready') {
-    found.loading = found.loading || p.status === 'loading';
-    return;
-  }
+  if (pending(p)) found.loading = true;
+  if (p.status !== 'ready') return;
   for (const r of new Set([have(p), core.latestStable(p.releases)].filter(Boolean))) {
     ensure(p, r, 'manifest');
     if (r.manifest === undefined) found.loading = true;
@@ -179,7 +172,7 @@ function dependenciesEmpty(found, q) {
 export function dependenciesModule(full) {
   const q = ui.dep.trim();
   const found = { rows: [], loading: false };
-  for (const spec of watched()) dependenciesFor(project(spec), q, found);
+  for (const p of watchedProjects()) dependenciesFor(p, q, found);
   const b = box({
     title: 'Who uses a module?',
     body: [
@@ -204,10 +197,10 @@ const MODULES = {
 };
 
 export function overviewPage() {
-  const specs = watched();
-  for (const s of specs) prime(project(s));
+  const list = watchedProjects();
+  for (const p of list) prime(p);
   const on = settings.get().overview.filter(m => m.on);
   if (!on.length) return blank('Nothing to show', 'Every overview module is turned off. ', h('a', { href: '#/settings' }, 'Choose modules'));
-  if (!specs.length) return [on.some(m => m.id === 'search') ? searchModule() : null, nothingPinned()];
+  if (!list.length) return [on.some(m => m.id === 'search') ? searchModule() : null, nothingPinned()];
   return on.map(m => MODULES[m.id]());
 }

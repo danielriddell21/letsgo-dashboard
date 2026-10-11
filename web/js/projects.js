@@ -17,7 +17,16 @@ export function watched() {
   const s = settings.get();
   return (s.projects ?? session.config.defaults).map(core.parseSpec).filter(Boolean);
 }
-export function setWatched(ids) { settings.set({ projects: ids }); }
+export const isWatched = id => watched().some(s => s.id === id);
+
+// watch adds a parsed spec to the watch list; unwatch removes an ID from it.
+export function watch(spec) {
+  if (!isWatched(spec.id)) settings.set({ projects: [...watched().map(s => s.id), spec.id] });
+}
+export function unwatch(id) {
+  settings.set({ projects: watched().map(s => s.id).filter(x => x !== id) });
+}
+
 export function forgetProjects() { projects.clear(); }
 // pinned is the watched projects in the order the overview lists them:
 // those released with letsgo first, then those still loading, then the rest,
@@ -27,10 +36,13 @@ export function pinned() {
     if (p.status === 'ready') return p.supported ? 0 : 2;
     return p.status === 'error' ? 2 : 1;
   };
-  return watched().map(project).map((p, i) => ({ p, i })).sort((a, b) => rank(a.p) - rank(b.p) || a.i - b.i).map(x => x.p);
+  return watchedProjects().map((p, i) => ({ p, i })).sort((a, b) => rank(a.p) - rank(b.p) || a.i - b.i).map(x => x.p);
 }
 
 export const have = p => p.byTag[settings.get().have[p.id]] || null;
+
+// pending is true while a project's releases are still on their way.
+export const pending = p => p.status === 'idle' || p.status === 'loading';
 
 // project returns a project's state, starting its load the first time.
 export function project(spec) {
@@ -43,6 +55,9 @@ export function project(spec) {
   return p;
 }
 export const findProject = id => projects.get(id);
+
+// watchedProjects is every watched project's state.
+export const watchedProjects = () => watched().map(project);
 
 function toRelease(p, x) {
   const version = core.parseTag(x.tag, p.prefix);

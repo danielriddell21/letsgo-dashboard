@@ -4,17 +4,16 @@
 import * as core from '../core.js';
 import { h } from '../dom.js';
 import { ui, schedule } from '../state.js';
-import { watched, project, ensure } from '../projects.js';
+import { watchedProjects, pending, ensure } from '../projects.js';
 import { box, flash, pageHead, spinner, statusOf, releaseLink } from '../ui.js';
 
 // findDigest reports what a SHA-256 is: { state: 'found', p, r, d },
 // { state: 'loading' } while manifests are still arriving, or
 // { state: 'unknown' }.
-export function findDigest(hash) {
+function findDigest(hash) {
   let loading = false;
-  for (const spec of watched()) {
-    const p = project(spec);
-    if (p.status === 'loading' || p.status === 'idle') {
+  for (const p of watchedProjects()) {
+    if (pending(p)) {
       loading = true;
       continue;
     }

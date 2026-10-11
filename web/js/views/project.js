@@ -5,28 +5,16 @@ import * as core from '../core.js';
 import { h, icon } from '../dom.js';
 import { settings, PROJECT_SECTIONS } from '../store.js';
 import { ui } from '../state.js';
-import { watched, have, ensure, ensureAudits } from '../projects.js';
+import { isWatched, have, ensure, ensureAudits } from '../projects.js';
 import {
   box, table, flash, blank, spinner, stateEl, statusOf, cmd, copyButton, external, githubLink, vulnLink,
-  labelEl, haveSelect, supportLabel,
+  labelEl, haveSelect, supportLabel, retryButton, PLATFORMS, platform, showPrereleases,
 } from '../ui.js';
-
-export const PLATFORMS = ['darwin/arm64', 'darwin/amd64', 'linux/amd64', 'linux/arm64', 'windows/amd64', 'windows/arm64'];
-
-export function platform() {
-  const p = settings.get().platform;
-  if (p) return p;
-  const agent = navigator.userAgent;
-  if (agent.includes('Mac')) return 'darwin/arm64';
-  if (agent.includes('Win')) return 'windows/amd64';
-  return 'linux/amd64';
-}
 
 const repoPath = p => `${encodeURIComponent(p.owner)}/${encodeURIComponent(p.repo)}`;
 
 function header(p) {
-  const watching = watched().some(s => s.id === p.id);
-  const button = watching
+  const button = isWatched(p.id)
     ? h('button', { class: 'btn btn-sm', 'data-action': 'unwatch', 'data-project': p.id }, 'Unpin')
     : h('button', { class: 'btn btn-sm btn-primary', 'data-action': 'watch', 'data-project': p.id }, 'Pin');
   return [
@@ -297,7 +285,7 @@ function versionRow(p, r, sel, mine) {
 }
 
 function versionsSection(p, sel, mine) {
-  const all = ui.allVersions || settings.get().prereleases;
+  const all = showPrereleases();
   const list = p.releases.filter(r => all || !r.prerelease || r === sel || r === mine);
   const shown = ui.allVersions ? list : list.slice(0, 15);
   return box({
@@ -369,7 +357,7 @@ function versionLabel(p, r) {
 }
 
 function toolbar(p, sel) {
-  const all = ui.allVersions || settings.get().prereleases;
+  const all = showPrereleases();
   const options = p.releases.filter(r => all || !r.prerelease || r === sel).map(r => h('option', { value: r.tag, selected: r === sel }, versionLabel(p, r)));
   return h('div', { class: 'row' },
     h('label', { class: 'row' }, h('span', { class: 'muted' }, 'Version'), h('select', { class: 'form-select', id: 'ver', 'data-version': p.id }, options)),
@@ -402,7 +390,7 @@ function sections(p, sel, mine, target) {
 
 function notReady(p) {
   if (p.status === 'error') {
-    return flash('danger', 'alert', p.error, h('button', { class: 'btn btn-sm', 'data-action': 'retry', 'data-project': p.id }, 'Retry'));
+    return flash('danger', 'alert', p.error, retryButton(p));
   }
   if (p.status !== 'ready') return h('p', {}, spinner(), ' Loading releases…');
   if (p.releases.length) return null;

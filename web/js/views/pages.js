@@ -3,10 +3,9 @@
 import { h, icon } from '../dom.js';
 import { settings, token, OVERVIEW_MODULES, PROJECT_SECTIONS } from '../store.js';
 import { session, ui, isStatic } from '../state.js';
-import { watched } from '../projects.js';
-import { flash, blank, pageHead, spinner, external, projectHref, pinButton } from '../ui.js';
+import { watched, isWatched } from '../projects.js';
+import { flash, blank, pageHead, spinner, external, projectHref, labelEl, pinButton, PLATFORMS, platform } from '../ui.js';
 import { searchModule } from './search.js';
-import { PLATFORMS, platform } from './project.js';
 
 export const notFound = () => blank('Page not found', h('a', { href: '#/' }, 'Back to the overview'));
 
@@ -14,9 +13,9 @@ const notice = () => (ui.notice ? flash('attention', 'alert', ui.notice) : null)
 
 function watchRow(id, description, isPrivate) {
   return h('div', { class: 'Box-row' },
-    h('div', { class: 'Box-row-grow' }, h('a', { href: `#/p/${encodeURIComponent(id)}` }, h('b', {}, id)), isPrivate ? [' ', h('span', { class: 'Label' }, 'Private')] : null,
+    h('div', { class: 'Box-row-grow' }, h('a', { href: `#/p/${encodeURIComponent(id)}` }, h('b', {}, id)), isPrivate ? [' ', labelEl('Private')] : null,
       description ? h('div', { class: 'small muted' }, description) : null),
-    pinButton(id, watched().some(s => s.id === id)));
+    pinButton(id, isWatched(id)));
 }
 
 function repoList() {

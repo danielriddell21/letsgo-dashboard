@@ -3,6 +3,22 @@
 import * as core from './core.js';
 import { h, icon } from './dom.js';
 import { settings } from './store.js';
+import { ui } from './state.js';
+
+export const PLATFORMS = ['darwin/arm64', 'darwin/amd64', 'linux/amd64', 'linux/arm64', 'windows/amd64', 'windows/arm64'];
+
+// platform is the one the viewer chose in Settings, or a guess from the browser.
+export function platform() {
+  const p = settings.get().platform;
+  if (p) return p;
+  const agent = navigator.userAgent;
+  if (agent.includes('Mac')) return 'darwin/arm64';
+  if (agent.includes('Win')) return 'windows/amd64';
+  return 'linux/amd64';
+}
+
+// showPrereleases is whether version lists include pre-releases.
+export const showPrereleases = () => ui.allVersions || settings.get().prereleases;
 
 const STATE_ICON = { success: 'check', danger: 'alert', attention: 'up', secondary: 'dot' };
 
@@ -26,6 +42,8 @@ export const spinner = () => h('span', { class: 'spinner', 'aria-label': 'Loadin
 export const copyButton = (text, label = 'Copy') => h('button', { class: 'btn-octicon', 'data-copy': text, 'aria-label': label }, icon('copy'));
 
 export const cmd = text => h('div', { class: 'cmd' }, h('code', {}, text), copyButton(text));
+
+export const retryButton = p => h('button', { class: 'btn btn-sm', 'data-action': 'retry', 'data-project': p.id }, 'Retry');
 
 export const external = (href, ...children) => h('a', { href, target: '_blank', rel: 'noopener' }, ...children);
 

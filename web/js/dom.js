@@ -5,7 +5,7 @@
 const SVG = 'http://www.w3.org/2000/svg';
 
 // safeURL lets through in-page links and https URLs, and nothing else.
-export function safeURL(url) {
+function safeURL(url) {
   const s = String(url ?? '');
   if (s.startsWith('#') || s.startsWith('https://')) return s;
   return '#';
@@ -24,7 +24,7 @@ function setAttribute(el, name, value) {
 
 // append adds children: nodes as they are, anything else as text. Arrays are
 // flattened, and null, undefined, false and '' are skipped.
-export function append(el, children) {
+function append(el, children) {
   for (const child of children.flat(Infinity)) {
     if (child === null || child === undefined || child === false || child === '') continue;
     el.append(child instanceof Node ? child : document.createTextNode(String(child)));
