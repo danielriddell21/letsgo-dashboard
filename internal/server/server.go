@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/danielriddell21/letsgo-dashboard/internal/github"
 )
 
 // Config is how one deployment is set up. Every field is optional.
@@ -39,19 +41,12 @@ type Config struct {
 	Version string
 }
 
-func (c Config) api() string {
-	if c.API == "" {
-		return "https://api.github.com"
-	}
-	return strings.TrimRight(c.API, "/")
-}
+// OAuth reports whether "Sign in with GitHub" is set up.
+func (c Config) OAuth() bool { return c.ClientID != "" && c.ClientSecret != "" }
 
-func (c Config) web() string {
-	if c.Web == "" {
-		return "https://github.com"
-	}
-	return strings.TrimRight(c.Web, "/")
-}
+func (c Config) api() string { return github.BaseURL(c.API, github.DefaultAPI) }
+
+func (c Config) web() string { return github.BaseURL(c.Web, github.DefaultWeb) }
 
 func (c Config) assetHosts() []string {
 	if len(c.AssetHosts) == 0 {
@@ -87,7 +82,7 @@ func (c Config) serveConfig(w http.ResponseWriter, _ *http.Request) {
 		Public   bool     `json:"public_token"`
 		Version  string   `json:"version"`
 	}{
-		OAuth:    c.ClientID != "" && c.ClientSecret != "",
+		OAuth:    c.OAuth(),
 		Web:      c.web(),
 		Defaults: c.Defaults,
 		Public:   c.PublicToken != "",

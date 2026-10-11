@@ -16,9 +16,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/danielriddell21/letsgo-dashboard/internal/github"
 )
 
 // Options describe one snapshot.
@@ -52,7 +55,7 @@ type Options struct {
 // Files the release list keeps per release. Only these are copied.
 var keep = []string{"letsgo.json", "audit.json"}
 
-var spec = regexp.MustCompile(`^([A-Za-z0-9_.-]{1,100})/([A-Za-z0-9_.-]{1,100})(@[A-Za-z0-9_./-]+)?$`)
+var spec = regexp.MustCompile(`^(` + github.Name + `)/(` + github.Name + `)(@[A-Za-z0-9_./-]+)?$`)
 
 // Release is a release as the page reads it, trimmed to what it uses.
 type Release struct {
@@ -87,25 +90,10 @@ func Write(ctx context.Context, o Options) error {
 	if o.Client == nil {
 		o.Client = &http.Client{Timeout: time.Minute}
 	}
-	if o.API == "" {
-		o.API = "https://api.github.com"
-	}
-	o.API = strings.TrimRight(o.API, "/")
-	if len(o.Projects) == 0 {
-		return errors.New("snapshot: no projects; name at least one owner/name")
-	}
-
-	repos := []string{}
-	seen := map[string]bool{}
-	for _, p := range o.Projects {
-		m := spec.FindStringSubmatch(p)
-		if m == nil {
-			return fmt.Errorf("snapshot: %q is not owner/name or owner/name@prefix/", p)
-		}
-		if r := m[1] + "/" + m[2]; !seen[r] {
-			seen[r] = true
-			repos = append(repos, r)
-		}
+	o.API = github.BaseURL(o.API, github.DefaultAPI)
+	repos, err := repositories(o.Projects)
+	if err != nil {
+		return err
 	}
 
 	if err := copyFS(o.Out, o.Web); err != nil {
@@ -118,10 +106,30 @@ func Write(ctx context.Context, o Options) error {
 	}
 
 	cfg := map[string]any{
-		"mode": "static", "oauth": false, "web": "https://github.com",
+		"mode": "static", "oauth": false, "web": github.DefaultWeb,
 		"defaults": o.Projects, "version": o.Version, "generated": o.Generated,
 	}
 	return writeJSON(filepath.Join(o.Out, "api", "config"), cfg)
+}
+
+// repositories is the distinct owner/name of each project, in order.
+func repositories(projects []string) ([]string, error) {
+	if len(projects) == 0 {
+		return nil, errors.New("snapshot: no projects; name at least one owner/name")
+	}
+	var repos []string
+	seen := map[string]bool{}
+	for _, p := range projects {
+		m := spec.FindStringSubmatch(p)
+		if m == nil {
+			return nil, fmt.Errorf("snapshot: %q is not owner/name or owner/name@prefix/", p)
+		}
+		if r := m[1] + "/" + m[2]; !seen[r] {
+			seen[r] = true
+			repos = append(repos, r)
+		}
+	}
+	return repos, nil
 }
 
 func (o Options) repo(ctx context.Context, full string) error {
@@ -147,6 +155,18 @@ func (o Options) repo(ctx context.Context, full string) error {
 		return err
 	}
 
+	releases, err := o.releases(ctx, full)
+	if err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(dir, "releases.json"), releases); err != nil {
+		return err
+	}
+	return o.assets(ctx, full, dir, releases)
+}
+
+// releases lists up to a thousand of a repository's published releases.
+func (o Options) releases(ctx context.Context, full string) ([]Release, error) {
 	var releases []Release
 	for page := 1; page <= 10; page++ {
 		var batch []struct {
@@ -164,7 +184,7 @@ func (o Options) repo(ctx context.Context, full string) error {
 			} `json:"assets"`
 		}
 		if err := o.getJSON(ctx, fmt.Sprintf("/repos/%s/releases?per_page=100&page=%d", full, page), &batch); err != nil {
-			return err
+			return nil, err
 		}
 		for _, b := range batch {
 			if b.Draft {
@@ -181,10 +201,7 @@ func (o Options) repo(ctx context.Context, full string) error {
 			break
 		}
 	}
-	if err := writeJSON(filepath.Join(dir, "releases.json"), releases); err != nil {
-		return err
-	}
-	return o.assets(ctx, full, dir, releases)
+	return releases, nil
 }
 
 // assets copies each release's letsgo.json and audit.json byte for byte: the
@@ -205,24 +222,22 @@ func (o Options) assets(ctx context.Context, full, dir string, releases []Releas
 	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
 	for i, id := range ids {
-		wg.Add(1)
 		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
-			data, err := o.get(ctx, fmt.Sprintf("/repos/%s/releases/assets/%d", full, id), "application/octet-stream")
+			data, err := o.get(ctx, fmt.Sprintf("/repos/%s/releases/assets/%d", full, id), github.OctetStream)
 			if err == nil {
-				err = writeFile(filepath.Join(dir, "assets", fmt.Sprint(id)), data)
+				err = writeFile(filepath.Join(dir, "assets", strconv.FormatInt(id, 10)), data)
 			}
 			errs[i] = err
-		}()
+		})
 	}
 	wg.Wait()
 	return errors.Join(errs...)
 }
 
 func (o Options) getJSON(ctx context.Context, path string, v any) error {
-	data, err := o.get(ctx, path, "application/vnd.github+json")
+	data, err := o.get(ctx, path, github.JSON)
 	if err != nil {
 		return err
 	}
@@ -266,15 +281,9 @@ func (o Options) get(ctx context.Context, path, accept string) ([]byte, error) {
 
 // getOnce is one try, and whether trying again could help.
 func (o Options) getOnce(ctx context.Context, path, accept string) (data []byte, retry bool, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.API+path, nil)
+	req, err := github.NewRequest(ctx, o.API+path, o.Token, accept)
 	if err != nil {
 		return nil, false, fmt.Errorf("snapshot: %w", err)
-	}
-	req.Header.Set("Accept", accept)
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("User-Agent", "letsgo-dashboard")
-	if o.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+o.Token)
 	}
 	resp, err := o.Client.Do(req)
 	if err != nil {

@@ -9,13 +9,15 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
-	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/danielriddell21/letsgo-dashboard/internal/config"
 	"github.com/danielriddell21/letsgo-dashboard/internal/server"
 	"github.com/danielriddell21/letsgo-dashboard/internal/snapshot"
 )
@@ -25,82 +27,107 @@ var web embed.FS
 
 var version = "dev"
 
+// shutdownGrace is how long requests in flight get to finish on SIGTERM.
+const shutdownGrace = 10 * time.Second
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "snapshot" {
-		os.Exit(runSnapshot(os.Args[2:]))
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
+}
 
-	addr := flag.String("addr", env("ADDR", ":8080"), "address to listen on")
-	health := flag.Bool("healthcheck", false, "check that a server on -addr is answering, and exit")
-	flag.Parse()
+// run serves the dashboard, or with "snapshot" first, writes it as a site.
+// SIGINT or SIGTERM stops either one.
+func run(args []string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	cfg := config.Load(os.Getenv)
+	cfg.Server.Version = version
+	if len(args) > 0 && args[0] == "snapshot" {
+		return runSnapshot(ctx, cfg, args[1:])
+	}
+	return runServer(ctx, cfg, args)
+}
+
+// runServer serves the dashboard until ctx is cancelled:
+// letsgo-dashboard [-addr host:port] [-healthcheck].
+func runServer(ctx context.Context, cfg config.Config, args []string) error {
+	flags := flag.NewFlagSet("letsgo-dashboard", flag.ExitOnError)
+	addr := flags.String("addr", cfg.Addr, "address to listen on")
+	health := flags.Bool("healthcheck", false, "check that a server on -addr is answering, and exit")
+	_ = flags.Parse(args)
 	if *health {
-		os.Exit(healthcheck(*addr))
+		return healthcheck(ctx, *addr)
 	}
 
-	cfg := server.Config{
-		API:          os.Getenv("GITHUB_API_URL"),
-		Web:          os.Getenv("GITHUB_SERVER_URL"),
-		ClientID:     os.Getenv("GITHUB_CLIENT_ID"),
-		ClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
-		PublicToken:  os.Getenv("DASHBOARD_PUBLIC_TOKEN"),
-		Defaults:     list(os.Getenv("DASHBOARD_REPOS")),
-		AssetHosts:   list(os.Getenv("DASHBOARD_ASSET_HOSTS")),
-		Version:      version,
-	}
-	static, err := fsSub()
+	static, err := webFS()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           server.New(cfg, static),
+		Handler:           server.New(cfg.Server, static),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 	}
+
 	signIn := "off (viewers paste a token)"
-	if cfg.ClientID != "" && cfg.ClientSecret != "" {
+	if cfg.Server.OAuth() {
 		signIn = "on"
 	}
 	fmt.Printf("letsgo-dashboard %s listening on %s, GitHub sign-in %s\n", version, *addr, signIn)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatal(err)
+
+	served := make(chan error, 1)
+	go func() { served <- srv.ListenAndServe() }()
+	select {
+	case err := <-served:
+		return fmt.Errorf("serve: %w", err)
+	case <-ctx.Done():
 	}
+
+	// A fresh context: the one given here is already cancelled.
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown: %w", err)
+	}
+	if err := <-served; !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("serve: %w", err)
+	}
+	return nil
 }
 
 // runSnapshot writes the dashboard as a static site for public
 // repositories, for GitHub Pages: letsgo-dashboard snapshot [-o dir] owner/name...
-func runSnapshot(args []string) int {
-	fs := flag.NewFlagSet("snapshot", flag.ExitOnError)
-	out := fs.String("o", "site", "directory to write the site to")
-	_ = fs.Parse(args)
-	static, err := fsSub()
+func runSnapshot(ctx context.Context, cfg config.Config, args []string) error {
+	flags := flag.NewFlagSet("snapshot", flag.ExitOnError)
+	out := flags.String("o", "site", "directory to write the site to")
+	_ = flags.Parse(args)
+
+	static, err := webFS()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return err
 	}
-	projects := fs.Args()
+	projects := flags.Args()
 	if len(projects) == 0 {
-		projects = list(os.Getenv("DASHBOARD_REPOS"))
+		projects = cfg.Server.Defaults
 	}
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
-		token = os.Getenv("GH_TOKEN")
-	}
-	err = snapshot.Write(context.Background(), snapshot.Options{
-		API: os.Getenv("GITHUB_API_URL"), Token: token, Projects: projects, Out: *out, Web: static,
+	err = snapshot.Write(ctx, snapshot.Options{
+		API: cfg.Server.API, Token: cfg.Token, Projects: projects, Out: *out, Web: static,
 		Version: version, Generated: time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return err
 	}
 	fmt.Printf("wrote %s: %s\n", *out, strings.Join(projects, ", "))
-	return 0
+	return nil
 }
 
-func fsSub() (fs.FS, error) {
+// webFS is the page, from web/ in the binary.
+func webFS() (fs.FS, error) {
 	static, err := fs.Sub(web, "web")
 	if err != nil {
 		return nil, fmt.Errorf("web: %w", err)
@@ -110,31 +137,18 @@ func fsSub() (fs.FS, error) {
 
 // healthcheck asks whether a server is accepting connections on addr. The
 // image has no shell or curl, so the binary checks itself.
-func healthcheck(addr string) int {
+func healthcheck(ctx context.Context, addr string) error {
 	host := addr
 	if strings.HasPrefix(host, ":") {
 		host = "127.0.0.1" + host
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", host)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return fmt.Errorf("healthcheck: %w", err)
 	}
 	_ = conn.Close()
-	return 0
-}
-
-func env(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-// list splits a comma- or space-separated setting.
-func list(s string) []string {
-	return strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' })
+	return nil
 }

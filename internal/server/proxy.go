@@ -1,24 +1,22 @@
 package server
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/danielriddell21/letsgo-dashboard/internal/github"
 )
 
 // maxBody bounds anything relayed. A manifest is tens of kilobytes; a release
 // list of a hundred is a few hundred.
 const maxBody = 8 << 20
-
-// name is an owner or repository name as GitHub allows them.
-const name = `[A-Za-z0-9_.-]{1,100}`
-
-// octetStream is how a release file is asked for and served.
-const octetStream = "application/octet-stream"
 
 // route is one GitHub read the proxy relays.
 type route struct {
@@ -26,6 +24,8 @@ type route struct {
 	query []string
 	asset bool
 }
+
+const name = github.Name
 
 // routes are the only GitHub calls relayed, all reads. Anything else is
 // refused, so the server can't be used as an open proxy into GitHub.
@@ -84,9 +84,9 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accept := "application/vnd.github+json"
+	accept := github.JSON
 	if rt.asset {
-		accept = octetStream
+		accept = github.OctetStream
 	}
 	resp, err := p.get(r.Context(), rt.target(p.cfg.api(), path, r.URL.Query()), p.token(r), accept, rt.asset)
 	if err != nil {
@@ -113,10 +113,8 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // token is the viewer's own, or the deployment's public one.
 func (p *proxy) token(r *http.Request) string {
-	if t := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")); t != "" {
-		return t
-	}
-	return p.cfg.PublicToken
+	t, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return cmp.Or(strings.TrimSpace(t), p.cfg.PublicToken)
 }
 
 // cacheAsset lets the browser keep a release file: an asset's ID is never
@@ -124,7 +122,7 @@ func (p *proxy) token(r *http.Request) string {
 // private repository's file from being served to a request that doesn't carry
 // the same token, such as after signing out.
 func cacheAsset(h http.Header) {
-	h.Set("Content-Type", octetStream)
+	h.Set("Content-Type", github.OctetStream)
 	h.Set("Cache-Control", "private, max-age=86400")
 	h.Set("Vary", "Authorization")
 }
@@ -135,37 +133,25 @@ func cacheAsset(h http.Header) {
 func (p *proxy) get(ctx context.Context, target, token, accept string, asset bool) (*http.Response, error) {
 	// target is the configured API base plus a path that matched a route
 	// above, so it can't name another host.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil) //nolint:gosec // G704: path allowlisted in ServeHTTP
-	if err != nil {
-		return nil, fmt.Errorf("proxy: %w", err)
-	}
-	req.Header.Set("Accept", accept)
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("User-Agent", "letsgo-dashboard")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := p.client.Do(req) //nolint:gosec // G704: path allowlisted in ServeHTTP
-	if err != nil {
-		return nil, fmt.Errorf("proxy: %w", err)
-	}
-	if !asset || (resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusMovedPermanently &&
-		resp.StatusCode != http.StatusTemporaryRedirect && resp.StatusCode != http.StatusSeeOther) {
-		return resp, nil
+	resp, err := p.do(ctx, target, token, accept)
+	if err != nil || !asset || !github.IsRedirect(resp.StatusCode) {
+		return resp, err
 	}
 	_ = resp.Body.Close()
 
 	loc, err := url.Parse(resp.Header.Get("Location"))
 	if err != nil || !p.assetHost(loc) {
-		return nil, fmt.Errorf("asset redirected to an unexpected host")
+		return nil, errors.New("proxy: asset redirected to an unexpected host")
 	}
-	next, err := http.NewRequestWithContext(ctx, http.MethodGet, loc.String(), nil) //nolint:gosec // G704: host checked by assetHost
+	return p.do(ctx, loc.String(), "", github.OctetStream)
+}
+
+func (p *proxy) do(ctx context.Context, target, token, accept string) (*http.Response, error) {
+	req, err := github.NewRequest(ctx, target, token, accept)
 	if err != nil {
 		return nil, fmt.Errorf("proxy: %w", err)
 	}
-	next.Header.Set("Accept", "application/octet-stream")
-	next.Header.Set("User-Agent", "letsgo-dashboard")
-	resp, err = p.client.Do(next) //nolint:gosec // G704: host checked by assetHost
+	resp, err := p.client.Do(req) //nolint:gosec // G704: path allowlisted in ServeHTTP, redirect host checked by assetHost
 	if err != nil {
 		return nil, fmt.Errorf("proxy: %w", err)
 	}

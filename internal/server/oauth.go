@@ -18,7 +18,7 @@ type exchange struct {
 }
 
 func (e *exchange) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if e.cfg.ClientID == "" || e.cfg.ClientSecret == "" {
+	if !e.cfg.OAuth() {
 		fail(w, http.StatusNotFound, "sign-in with GitHub isn't set up on this server")
 		return
 	}
