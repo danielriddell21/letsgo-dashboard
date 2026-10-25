@@ -60,7 +60,7 @@ jobs:
           # shellcheck disable=SC2086 # one argument per project, by design
           go run . snapshot -o site ${PAGES_REPOS//,/ }
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
